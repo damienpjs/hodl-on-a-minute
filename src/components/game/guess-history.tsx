@@ -82,11 +82,13 @@ function HistoryRow({ result }: { result: LastResult }) {
   const won = result.delta === 1;
   const wentUp = result.direction === "up";
 
+  // Two lines rather than one: in the sidebar the column is 340px wide, and a
+  // single row would truncate the pair of prices — the one thing worth reading.
   return (
-    <li className="flex items-center gap-3 py-2.5 text-sm" data-testid="history-row">
+    <li className="flex items-start gap-3 py-2.5 text-sm" data-testid="history-row">
       <span
         className={cn(
-          "flex size-6 shrink-0 items-center justify-center rounded-md",
+          "mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md",
           wentUp
             ? "bg-emerald-400/12 text-emerald-300"
             : "bg-rose-400/12 text-rose-300",
@@ -99,15 +101,17 @@ function HistoryRow({ result }: { result: LastResult }) {
         )}
       </span>
 
-      <span className="w-10 shrink-0 font-medium capitalize">{result.direction}</span>
-
-      <span className="flex-1 truncate tabular-nums text-muted-foreground">
-        {usd.format(result.entryPrice)} → {usd.format(result.resolvedPrice)}
-      </span>
-
-      <span className="shrink-0 text-xs tabular-nums text-muted-foreground/70">
-        {time.format(result.resolvedAt)}
-      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline justify-between gap-2">
+          <span className="font-medium capitalize">{result.direction}</span>
+          <span className="shrink-0 text-xs tabular-nums text-muted-foreground/70">
+            {time.format(result.resolvedAt)}
+          </span>
+        </div>
+        <p className="truncate tabular-nums text-muted-foreground">
+          {usd.format(result.entryPrice)} → {usd.format(result.resolvedPrice)}
+        </p>
+      </div>
 
       <span
         className={cn(

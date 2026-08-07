@@ -19,8 +19,9 @@ import { cn } from "@/lib/utils";
  * state the player can be in — counting down, waiting for a move, just won, just
  * lost — is reachable in a test by passing different props.
  *
- * Two columns on a wide screen: the market on the left, the act of playing on
- * the right. On a narrow one they stack, market first.
+ * Two columns on a wide screen: the market and the act of playing on the left,
+ * the record of past guesses on the right. On a narrow one they stack, market
+ * first, so the price and the buttons stay together.
  */
 
 export type GameBoardProps = {
@@ -30,7 +31,8 @@ export type GameBoardProps = {
   ticks: PriceTick[];
   now: number;
   onGuess: (direction: Direction) => void;
-  isPlacing: boolean;
+  /** The direction being submitted right now, or `null` when nothing is in flight. */
+  placing: Direction | null;
   actionError: string | null;
 };
 
@@ -72,11 +74,16 @@ export function GameBoard({
   ticks,
   now,
   onGuess,
-  isPlacing,
+  placing,
   actionError,
 }: GameBoardProps) {
   const guess = state.activeGuess;
-  const isLocked = Boolean(guess) || isPlacing;
+  const isLocked = Boolean(guess) || placing !== null;
+
+  // The direction the player is committed to, from the instant they click:
+  // `placing` covers the round-trip, `guess.direction` everything after it. The
+  // buttons key their colour off this, so the choice is never briefly forgotten.
+  const chosen = guess?.direction ?? placing;
 
   // Client clock against a server timestamp. Good enough for a countdown; the
   // resolution decision itself is made server-side and never trusts this.
@@ -84,6 +91,7 @@ export function GameBoard({
     ? Math.max(0, guess.entryAt + RESOLUTION_DELAY_MS - now)
     : 0;
   const remainingSeconds = Math.ceil(remainingMs / 1000);
+  const remainingFraction = remainingMs / RESOLUTION_DELAY_MS;
 
   return (
     <div className="w-full max-w-5xl space-y-10">
@@ -171,14 +179,6 @@ export function GameBoard({
           </Card>
 
           <Card className="[--card-spacing:--spacing(6)]">
-            <CardContent>
-              <GuessHistory results={state.history} />
-            </CardContent>
-          </Card>
-        </div>
-
-        <aside className="lg:sticky lg:top-6 lg:self-start">
-          <Card className="[--card-spacing:--spacing(6)]">
             <CardContent className="space-y-5">
               <div className="flex items-baseline justify-between">
                 <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -206,31 +206,27 @@ export function GameBoard({
               </div>
 
               <div className="grid grid-cols-2 gap-3">
-                <Button
-                  size="lg"
-                  variant="outline"
-                  className="h-14 border-emerald-300/25 bg-emerald-400/12 text-base text-emerald-200 hover:bg-emerald-400/20 hover:text-emerald-100"
-                  disabled={isLocked}
-                  onClick={() => onGuess("up")}
-                >
-                  {isPlacing ? <Loader2 className="animate-spin" /> : <ArrowUp />}
-                  Up
-                </Button>
-                <Button
-                  size="lg"
-                  variant="outline"
-                  className="h-14 border-rose-300/25 bg-rose-400/12 text-base text-rose-200 hover:bg-rose-400/20 hover:text-rose-100"
-                  disabled={isLocked}
-                  onClick={() => onGuess("down")}
-                >
-                  {isPlacing ? <Loader2 className="animate-spin" /> : <ArrowDown />}
-                  Down
-                </Button>
+                <DirectionButton
+                  direction="up"
+                  chosen={chosen}
+                  locked={isLocked}
+                  isPlacing={placing === "up"}
+                  remainingFraction={remainingFraction}
+                  onClick={onGuess}
+                />
+                <DirectionButton
+                  direction="down"
+                  chosen={chosen}
+                  locked={isLocked}
+                  isPlacing={placing === "down"}
+                  remainingFraction={remainingFraction}
+                  onClick={onGuess}
+                />
               </div>
 
               {isLocked && (
                 <p className="text-center text-sm text-muted-foreground" role="status">
-                  {isPlacing
+                  {placing
                     ? "Placing your guess…"
                     : "One guess at a time — wait for this one to resolve."}
                 </p>
@@ -243,9 +239,120 @@ export function GameBoard({
               )}
             </CardContent>
           </Card>
+        </div>
+
+        {/* Not sticky: "Show all" can make this list taller than the viewport,
+            and a stuck element that tall hides its own bottom rows. */}
+        <aside>
+          <Card className="[--card-spacing:--spacing(6)]">
+            <CardContent>
+              <GuessHistory results={state.history} />
+            </CardContent>
+          </Card>
         </aside>
       </div>
     </div>
+  );
+}
+
+/**
+ * The two colours are the app's whole vocabulary — green is up, red is down —
+ * so the surest way to keep the player's choice in front of them is to leave
+ * their colour switched on and switch the other one off.
+ *
+ * Three states, and only three:
+ *
+ * - `idle`    — both playable, tinted, hoverable.
+ * - `chosen`  — locked in. Full colour at full opacity, ringed, and the fill
+ *               drains left-to-right as the minute runs out.
+ * - `dimmed`  — the road not taken. Stripped of colour and faded, so it reads
+ *               as unavailable rather than as a second live option.
+ *
+ * `ghost` rather than `outline`: the outline variant carries its own
+ * `dark:bg-*`, which — being a compound selector — outranks a plain `bg-*` on
+ * specificity and would quietly win over the tint on this dark-only theme.
+ */
+const DIRECTION_TONE = {
+  up: {
+    idle: "border-emerald-300/25 bg-emerald-400/12 text-emerald-200 hover:bg-emerald-400/20 dark:hover:bg-emerald-400/20 hover:text-emerald-100",
+    chosen:
+      "border-emerald-300/55 bg-emerald-400/18 text-emerald-100 ring-1 ring-emerald-300/25",
+    drain: "bg-emerald-400/30",
+  },
+  down: {
+    idle: "border-rose-300/25 bg-rose-400/12 text-rose-200 hover:bg-rose-400/20 dark:hover:bg-rose-400/20 hover:text-rose-100",
+    chosen: "border-rose-300/55 bg-rose-400/18 text-rose-100 ring-1 ring-rose-300/25",
+    drain: "bg-rose-400/30",
+  },
+} as const;
+
+const DIRECTION_ICON = { up: ArrowUp, down: ArrowDown } as const;
+
+function DirectionButton({
+  direction,
+  chosen,
+  locked,
+  isPlacing,
+  remainingFraction,
+  onClick,
+}: {
+  direction: Direction;
+  chosen: Direction | null;
+  locked: boolean;
+  isPlacing: boolean;
+  remainingFraction: number;
+  onClick: (direction: Direction) => void;
+}) {
+  const tone = DIRECTION_TONE[direction];
+  const Icon = DIRECTION_ICON[direction];
+
+  const state = !locked ? "idle" : chosen === direction ? "chosen" : "dimmed";
+  const remaining = Math.min(1, Math.max(0, remainingFraction));
+
+  return (
+    <Button
+      size="lg"
+      variant="ghost"
+      className={cn(
+        "relative h-14 overflow-hidden text-base",
+        state === "idle" && tone.idle,
+        // `disabled:opacity-100` undoes the button's own fade: this one is
+        // disabled but it is not the greyed-out one, it is the answer.
+        state === "chosen" && cn(tone.chosen, "disabled:opacity-100"),
+        state === "dimmed" && "border-border text-muted-foreground disabled:opacity-40",
+      )}
+      disabled={locked}
+      onClick={() => onClick(direction)}
+      data-testid={`direction-${direction}`}
+      data-state={state}
+    >
+      {/*
+        A time bar rather than a second countdown: the seconds are already
+        written above in full size, and this only has to answer "how much
+        longer" at a glance. It empties to nothing at the 60-second mark, which
+        is also the moment the copy above stops counting.
+      */}
+      {state === "chosen" && (
+        <span
+          aria-hidden="true"
+          className={cn(
+            "absolute inset-y-0 left-0 transition-[width] duration-200 ease-linear motion-reduce:transition-none",
+            tone.drain,
+          )}
+          style={{ width: `${remaining * 100}%` }}
+          data-testid={`direction-${direction}-drain`}
+        />
+      )}
+
+      <span className="relative flex items-center gap-2">
+        {isPlacing ? (
+          <Loader2 className="size-4 animate-spin" />
+        ) : (
+          <Icon className="size-4" />
+        )}
+        {direction === "up" ? "Up" : "Down"}
+      </span>
+    </Button>
   );
 }
 
