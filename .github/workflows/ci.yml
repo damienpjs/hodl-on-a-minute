@@ -1,0 +1,51 @@
+name: CI
+
+# Every push, on every branch. In a single-maintainer repo each pull request
+# head is a pushed branch, so this reports on PRs too without running twice.
+on:
+  push:
+    branches: ["**"]
+
+# A new push supersedes the run in flight rather than queueing behind it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Lint, types and tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Matches the version the project is developed and verified against. The
+      # AWS SDK will require Node 22 from January 2027; bump this and the Vercel
+      # runtime together when that day comes, not one before the other.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      # Must run before tsc. `layout.tsx` uses `LayoutProps`, which Next
+      # generates into the git-ignored `.next/types`. On a clean checkout that
+      # directory does not exist, and typechecking fails with "Cannot find name
+      # 'LayoutProps'" before reaching a single line of our own code.
+      - name: Generate route types
+        run: npx next typegen
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # No service container needed: the DynamoDB suite skips itself when
+      # nothing answers on the endpoint.
+      - name: Tests
+        run: npm test
