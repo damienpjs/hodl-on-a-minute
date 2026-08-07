@@ -32,22 +32,46 @@ describe("computeGeometry", () => {
 
     const geometry = computeGeometry({ ticks: stale, now: NOW });
 
-    // Three samples in, two points out — and the 1_000 outlier never got to
-    // stretch the price domain.
-    expect(geometry?.line.split(" ")).toHaveLength(2);
+    // Three samples in, two kept plus the left-edge hold — and the 1_000 outlier
+    // never got to stretch the price domain.
+    const ys = geometry!.line.split(" ").map((p) => Number(p.split(",")[1]));
+    expect(ys).toHaveLength(3);
+    for (const y of ys) expect(y).toBeGreaterThanOrEqual(0);
   });
 
   it("puts the newest sample at the right edge and the oldest further left", () => {
     const geometry = computeGeometry({ ticks: ticks([65_000, 65_100]), now: NOW });
-    const [first, last] = geometry!.line.split(" ").map((p) => Number(p.split(",")[0]));
+    const xs = geometry!.line.split(" ").map((p) => Number(p.split(",")[0]));
 
-    expect(last).toBeCloseTo(1000, 5);
-    expect(first).toBeLessThan(last);
+    expect(xs.at(-1)).toBeCloseTo(1000, 5);
+    expect(xs[0]).toBeLessThan(xs.at(-1)!);
+  });
+
+  it("holds the oldest sample flat to the left edge while the window fills", () => {
+    const geometry = computeGeometry({ ticks: ticks([65_000, 65_100]), now: NOW })!;
+    const points = geometry.line.split(" ").map((p) => p.split(",").map(Number));
+
+    // The trace starts at x = 0, at the same height as the first real sample.
+    expect(points[0][0]).toBeCloseTo(0, 5);
+    expect(points[0][1]).toBeCloseTo(points[1][1], 5);
+
+    // And so does the filled area below it, rather than a step up from mid-frame.
+    expect(geometry.area).toMatch(/^M 0,300 L 0,/);
+  });
+
+  it("does not pad once the window is full", () => {
+    const full = [
+      { at: NOW - CHART_WINDOW_MS, price: 65_000 },
+      { at: NOW, price: 65_100 },
+    ];
+
+    expect(computeGeometry({ ticks: full, now: NOW })?.line.split(" ")).toHaveLength(2);
   });
 
   it("puts a rising price higher on screen than a falling one", () => {
     const geometry = computeGeometry({ ticks: ticks([65_000, 65_500]), now: NOW });
-    const [low, high] = geometry!.line.split(" ").map((p) => Number(p.split(",")[1]));
+    const ys = geometry!.line.split(" ").map((p) => Number(p.split(",")[1]));
+    const [low, high] = ys.slice(-2);
 
     // SVG y grows downward, so the more expensive point has the smaller y.
     expect(high).toBeLessThan(low);
