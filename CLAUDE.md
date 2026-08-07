@@ -68,9 +68,14 @@ Vitest + Testing Library · deployed on Vercel.
 
 - Accept a price, a timestamp or a player id from the client.
 - Use `localStorage` for identity.
-- Add authentication, a leaderboard, a guess history table, real money, a custom
+- Add authentication, a leaderboard, a separate `guesses` table, real money, a custom
   WebSocket server, or multi-region anything. These are deliberately out of scope and
   the reasons are written down — see the README's "known limitations".
+
+  Note the wording: **no separate table**, not "no history". Resolved guesses are kept
+  as a `history` list on the player item, prepended by the very same conditional write
+  that resolves them. One item still means one atomic update, so the idempotence
+  guarantee is untouched. A second table would need a DynamoDB transaction to keep it.
 - Chase global test coverage. Cover the resolution logic and the fairness guarantees
   deeply; leave the rest.
 - Commit `.env`. This repo is public.

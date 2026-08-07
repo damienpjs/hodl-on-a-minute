@@ -11,7 +11,7 @@ function renderBoard(overrides: Partial<GameBoardProps> = {}) {
   const onGuess = vi.fn();
 
   const props: GameBoardProps = {
-    state: { playerId: "p1", score: 0 },
+    state: { playerId: "p1", score: 0, history: [] },
     price: 65_000,
     priceStatus: "live",
     ticks: [],
@@ -31,6 +31,7 @@ function withGuess(now: number, extra: Partial<GameState> = {}): Partial<GameBoa
     state: {
       playerId: "p1",
       score: 0,
+      history: [],
       activeGuess: {
         id: "g1",
         direction: "up",
@@ -99,20 +100,27 @@ describe("GameBoard — reporting the outcome", () => {
   const resolved: GameState = {
     playerId: "p1",
     score: 1,
-    lastResult: {
-      direction: "up",
-      entryPrice: 65_000,
-      resolvedPrice: 65_120,
-      delta: 1,
-      resolvedAt: ENTRY_AT + 60_000,
-    },
+    history: [
+      {
+        direction: "up",
+        entryPrice: 65_000,
+        resolvedPrice: 65_120,
+        delta: 1,
+        resolvedAt: ENTRY_AT + 60_000,
+      },
+    ],
   };
 
-  it("headlines a win", () => {
+  it("headlines a win and lists it in the history", () => {
+    // A live price distinct from both result prices, so the row assertion below
+    // can only match the history.
     renderBoard({ state: resolved, price: 70_000 });
 
     expect(screen.getByText(/you were right/i)).toBeInTheDocument();
     expect(screen.getByTestId("result-delta")).toHaveTextContent("+1");
+    expect(screen.getByTestId("history-row")).toHaveTextContent(
+      "$65,000.00 → $65,120.00",
+    );
   });
 
   it("shows a loss as a loss", () => {
@@ -120,7 +128,7 @@ describe("GameBoard — reporting the outcome", () => {
       state: {
         ...resolved,
         score: -1,
-        lastResult: { ...resolved.lastResult!, delta: -1, resolvedPrice: 64_900 },
+        history: [{ ...resolved.history[0], delta: -1, resolvedPrice: 64_900 }],
       },
     });
 
@@ -129,7 +137,7 @@ describe("GameBoard — reporting the outcome", () => {
   });
 
   it("signs a positive score so it reads as a gain", () => {
-    renderBoard({ state: { playerId: "p1", score: 3 } });
+    renderBoard({ state: { playerId: "p1", score: 3, history: [] } });
 
     expect(screen.getByTestId("score")).toHaveTextContent("+3");
   });
