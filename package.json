@@ -6,6 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "db:local:up": "docker start hodl-ddb || docker run -d -p 8000:8000 --name hodl-ddb amazon/dynamodb-local",
+    "db:local": "node scripts/create-local-table.mjs",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
