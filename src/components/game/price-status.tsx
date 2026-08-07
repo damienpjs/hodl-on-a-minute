@@ -17,10 +17,10 @@ const PRESENTATION: Record<
   PriceStatus,
   { label: string; dot: string; pulse: boolean }
 > = {
-  live: { label: "live", dot: "bg-emerald-500", pulse: true },
-  degraded: { label: "server fallback", dot: "bg-amber-500", pulse: false },
-  connecting: { label: "connecting", dot: "bg-amber-500", pulse: false },
-  offline: { label: "no price feed", dot: "bg-red-500", pulse: false },
+  live: { label: "live", dot: "bg-emerald-300", pulse: true },
+  degraded: { label: "server fallback", dot: "bg-amber-300", pulse: false },
+  connecting: { label: "connecting", dot: "bg-amber-300", pulse: false },
+  offline: { label: "no price feed", dot: "bg-rose-300", pulse: false },
 };
 
 export function PriceStatusBadge({ status }: { status: PriceStatus }) {
