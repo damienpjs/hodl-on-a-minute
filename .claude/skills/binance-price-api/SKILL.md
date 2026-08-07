@@ -49,9 +49,29 @@ Returns an array of arrays — no field names:
 | 7     | Quote volume| string |
 | 8     | Trade count | number |
 
-**Index 4 (close) is the price this app resolves against.** Open times are aligned to
-the minute, so `startTime` is rounded down into the candle containing it — pass
-`entryAt + 60_000` and read forward until a close differs from the entry price.
+**Index 4 (close) is the price this app resolves against.**
+
+### `startTime` rounds UP — floor it yourself
+
+Verified against the live API on 2026-08-07, because the behaviour is the opposite of
+what one would assume:
+
+```
+startTime=1786110192227  (inside the candle opening at 1786110180000)
+  → first candle returned: 1786110240000   ← the NEXT candle; the containing one is skipped
+
+startTime=1786110180000  (floored to the minute)
+  → first candle returned: 1786110180000   ← correct
+```
+
+Binance returns candles whose **open time is ≥ `startTime`**. A mid-candle `startTime`
+therefore silently drops the candle containing it, and resolution at `entryAt + 60_000`
+— which is almost never on a minute boundary — would read a price **one full minute
+late**.
+
+Always floor before querying: `Math.floor(ms / 60_000) * 60_000`. `getCandlesFrom` does
+this internally. No unit test with a fake price source can catch this class of bug: it
+lives in the remote API's semantics, so it has to be checked against the real endpoint.
 
 This endpoint is the reason Binance was chosen over CoinGecko: it makes resolution
 possible for a player who closed the browser and came back days later.
