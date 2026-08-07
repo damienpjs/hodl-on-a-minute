@@ -33,7 +33,13 @@ export type PlayerItem = {
   playerId: string;
   score: number;
   activeGuess?: ActiveGuess;
-  lastResult?: LastResult;
+  /**
+   * Resolved guesses, newest first, appended in the same conditional write that
+   * resolves them. A list on the player item rather than a `guesses` table: one
+   * item still means one atomic update, so the idempotence guarantee is
+   * unchanged. See the README for the ceiling this accepts.
+   */
+  history?: LastResult[];
   createdAt: number;
   updatedAt: number;
 };
