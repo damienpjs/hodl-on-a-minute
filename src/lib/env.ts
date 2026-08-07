@@ -12,6 +12,17 @@ const serverEnvSchema = z.object({
   AWS_ACCESS_KEY_ID: z.string().min(1),
   AWS_SECRET_ACCESS_KEY: z.string().min(1),
   DYNAMODB_TABLE: z.string().min(1),
+  // Points the SDK at DynamoDB Local for development and integration tests.
+  // Absent in production, and deliberately so: the real AWS endpoint is what you
+  // get by default, never something you must remember to switch back to.
+  //
+  // An empty value counts as absent — `DYNAMODB_ENDPOINT=` in a .env file is a
+  // variable that exists, and a bare `.optional()` would reject it rather than
+  // ignore it.
+  DYNAMODB_ENDPOINT: z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    z.url().optional(),
+  ),
   // Long enough that a signature cannot be brute-forced; `openssl rand -base64 32`.
   COOKIE_SECRET: z.string().min(32),
 });
