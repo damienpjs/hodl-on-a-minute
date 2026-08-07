@@ -48,7 +48,10 @@ export function Game() {
       ticks={ticks}
       now={now}
       onGuess={(direction) => guess.mutate(direction)}
-      isPlacing={guess.isPending}
+      // `variables` is the direction handed to the last `mutate`, so the board
+      // can light up the clicked button on the click itself rather than a
+      // round-trip later. Read only while the mutation is actually in flight.
+      placing={guess.isPending ? (guess.variables ?? null) : null}
       actionError={guess.isError ? describeGuessError(guess.error) : null}
     />
   );
