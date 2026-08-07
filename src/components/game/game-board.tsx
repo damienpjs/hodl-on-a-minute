@@ -1,5 +1,6 @@
 import { ArrowDown, ArrowUp, Bitcoin, Loader2 } from "lucide-react";
 
+import { GuessHistory } from "@/components/game/guess-history";
 import { PriceStatusBadge } from "@/components/game/price-status";
 import { TickChart } from "@/components/game/tick-chart";
 import { Badge } from "@/components/ui/badge";
@@ -169,6 +170,11 @@ export function GameBoard({
             </CardContent>
           </Card>
 
+          <Card className="[--card-spacing:--spacing(6)]">
+            <CardContent>
+              <GuessHistory results={state.history} />
+            </CardContent>
+          </Card>
         </div>
 
         <aside className="lg:sticky lg:top-6 lg:self-start">
@@ -195,7 +201,7 @@ export function GameBoard({
                     priceUnavailable={state.priceUnavailable === true}
                   />
                 ) : (
-                  <LastOutcome result={state.lastResult} />
+                  <LastOutcome result={state.history[0]} />
                 )}
               </div>
 

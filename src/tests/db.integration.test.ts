@@ -157,7 +157,33 @@ describe.skipIf(!containerIsUp)("data layer against DynamoDB Local", () => {
     const final = await getPlayer(playerId);
     expect(final?.score).toBe(1);
     expect(final?.activeGuess).toBeUndefined();
-    expect(final?.lastResult?.resolvedPrice).toBe(60_100);
+    // One entry, not two: the losing caller's append never happened either.
+    expect(final?.history).toHaveLength(1);
+    expect(final?.history?.[0].resolvedPrice).toBe(60_100);
+  });
+
+  it("prepends each resolved guess so the history reads newest first", async () => {
+    const playerId = randomUUID();
+    await getOrCreatePlayer(playerId);
+
+    for (const resolvedPrice of [60_100, 60_200, 60_300]) {
+      const guess = aGuess();
+      await createGuess(playerId, guess);
+      await resolveGuess(playerId, guess.id, 1, {
+        direction: guess.direction,
+        entryPrice: guess.entryPrice,
+        resolvedPrice,
+        delta: 1,
+        resolvedAt: Date.now(),
+      });
+    }
+
+    const final = await getPlayer(playerId);
+
+    expect(final?.score).toBe(3);
+    expect(final?.history?.map((entry) => entry.resolvedPrice)).toEqual([
+      60_300, 60_200, 60_100,
+    ]);
   });
 
   it("rejects a second resolution of an already-resolved guess", async () => {
