@@ -20,6 +20,10 @@ export function getDocumentClient(): DynamoDBDocumentClient {
       accessKeyId: env.AWS_ACCESS_KEY_ID,
       secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
     },
+    // Only set when DYNAMODB_ENDPOINT is present, which means DynamoDB Local.
+    // Spreading rather than passing `endpoint: undefined` keeps the SDK on its
+    // own region-derived default instead of asking it to interpret a blank.
+    ...(env.DYNAMODB_ENDPOINT ? { endpoint: env.DYNAMODB_ENDPOINT } : {}),
   });
 
   documentClient = DynamoDBDocumentClient.from(base, {
