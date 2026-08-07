@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -14,6 +14,7 @@ function renderBoard(overrides: Partial<GameBoardProps> = {}) {
     state: { playerId: "p1", score: 0 },
     price: 65_000,
     priceStatus: "live",
+    ticks: [],
     now: ENTRY_AT,
     onGuess,
     isPlacing: false,
@@ -107,15 +108,11 @@ describe("GameBoard — reporting the outcome", () => {
     },
   };
 
-  it("shows both prices and the delta after a win", () => {
-    // A live price distinct from both result prices, so each assertion below
-    // can only match the result panel.
+  it("headlines a win", () => {
     renderBoard({ state: resolved, price: 70_000 });
 
     expect(screen.getByText(/you were right/i)).toBeInTheDocument();
     expect(screen.getByTestId("result-delta")).toHaveTextContent("+1");
-    expect(screen.getByText("$65,000.00")).toBeInTheDocument();
-    expect(screen.getByText("$65,120.00")).toBeInTheDocument();
   });
 
   it("shows a loss as a loss", () => {
@@ -143,6 +140,44 @@ describe("GameBoard — the price display", () => {
     renderBoard({ price: null, priceStatus: "connecting" });
 
     expect(screen.getByText("—")).toBeInTheDocument();
+  });
+
+  it("always shows the Bitcoin mark", () => {
+    renderBoard();
+
+    expect(screen.getByTestId("bitcoin-mark")).toBeInTheDocument();
+  });
+
+  it("shows only the current price while no guess is in flight", () => {
+    renderBoard();
+
+    expect(screen.getByTestId("current-price")).toHaveTextContent("$65,000.00");
+    expect(screen.queryByTestId("price-to-beat")).not.toBeInTheDocument();
+  });
+
+  it("puts the price to beat next to the current one once a guess is live", () => {
+    renderBoard({ ...withGuess(ENTRY_AT + 10_000), price: 65_400 });
+
+    expect(screen.getByTestId("price-to-beat")).toHaveTextContent("$65,000.00");
+    expect(screen.getByTestId("current-price")).toHaveTextContent("$65,400.00");
+  });
+
+  it("tints the current price by where it stands, without flashing", () => {
+    renderBoard({ ...withGuess(ENTRY_AT + 10_000), price: 65_400 });
+    expect(screen.getByTestId("current-price").className).toContain("emerald");
+
+    cleanup();
+
+    renderBoard({ ...withGuess(ENTRY_AT + 10_000), price: 64_600 });
+    expect(screen.getByTestId("current-price").className).toContain("rose");
+  });
+
+  it("leaves the current price untinted while it sits exactly on the entry", () => {
+    renderBoard({ ...withGuess(ENTRY_AT + 10_000), price: 65_000 });
+
+    const tinted = screen.getByTestId("current-price").className;
+    expect(tinted).not.toContain("emerald");
+    expect(tinted).not.toContain("rose");
   });
 });
 

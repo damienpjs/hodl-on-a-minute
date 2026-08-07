@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { fetchServerPrice } from "@/lib/client/api";
 
@@ -38,14 +38,32 @@ const SERVER_POLL_INTERVAL_MS = 3_000;
  */
 export type PriceStatus = "offline" | "connecting" | "degraded" | "live";
 
+/** One sampled point of the trace. */
+export type PriceTick = { at: number; price: number };
+
 export type PriceFeed = {
   price: number | null;
   status: PriceStatus;
+  /** Rolling window of samples, oldest first, for the chart. */
+  ticks: PriceTick[];
 };
+
+/** Long enough to cover a full round plus its run-up. */
+const TICK_WINDOW_MS = 120_000;
+
+/**
+ * BTCUSDT trades many times a second. The displayed number follows every one of
+ * them, but the trace samples at this rate — a few hundred points is already
+ * more resolution than a 300px-tall chart can show, and storing every trade
+ * would grow without bound for no visible gain.
+ */
+const TICK_SAMPLE_MS = 500;
 
 export function useLivePrice(): PriceFeed {
   const [streamPrice, setStreamPrice] = useState<number | null>(null);
   const [streamFailed, setStreamFailed] = useState(false);
+  const [ticks, setTicks] = useState<PriceTick[]>([]);
+  const lastSampleAt = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -74,6 +92,20 @@ export function useLivePrice(): PriceFeed {
       clearTimeout(giveUp);
       setStreamPrice(price);
       setStreamFailed(false);
+
+      // Only the stream feeds the trace. When it dies the line stops growing
+      // rather than continuing at the fallback's three-second granularity — a
+      // coarse line drawn as if it were live would misrepresent the data, and
+      // the badge already says the feed is degraded.
+      const at = Date.now();
+      if (at - lastSampleAt.current < TICK_SAMPLE_MS) return;
+      lastSampleAt.current = at;
+
+      setTicks((previous) =>
+        [...previous, { at, price }].filter(
+          (tick) => at - tick.at <= TICK_WINDOW_MS,
+        ),
+      );
     });
 
     // `close` also fires on our own teardown, hence the `cancelled` guard.
@@ -102,17 +134,17 @@ export function useLivePrice(): PriceFeed {
 
   if (!streamFailed) {
     return streamPrice === null
-      ? { price: null, status: "connecting" }
-      : { price: streamPrice, status: "live" };
+      ? { price: null, status: "connecting", ticks }
+      : { price: streamPrice, status: "live", ticks };
   }
 
   // Fallen back. The last streamed price is better than nothing while the first
   // poll is in flight, but it is stale by definition — so the status says so.
   const price = serverPrice.data ?? streamPrice;
 
-  if (serverPrice.isError) return { price, status: "offline" };
+  if (serverPrice.isError) return { price, status: "offline", ticks };
 
-  return { price, status: price === null ? "connecting" : "degraded" };
+  return { price, status: price === null ? "connecting" : "degraded", ticks };
 }
 
 /**

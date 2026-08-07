@@ -13,7 +13,7 @@ import { useLivePrice } from "@/hooks/use-live-price";
  */
 export function Game() {
   const { state, guess } = useGame();
-  const { price, status } = useLivePrice();
+  const { price, status, ticks } = useLivePrice();
   const now = useNow();
 
   if (state.isPending) {
@@ -28,7 +28,7 @@ export function Game() {
   if (state.isError || !state.data) {
     return (
       <div className="w-full max-w-md space-y-4 text-center">
-        <p className="text-sm text-destructive" role="alert">
+        <p className="text-sm text-rose-300" role="alert">
           {state.error instanceof Error
             ? state.error.message
             : "Could not load the game"}
@@ -45,6 +45,7 @@ export function Game() {
       state={state.data}
       price={price}
       priceStatus={status}
+      ticks={ticks}
       now={now}
       onGuess={(direction) => guess.mutate(direction)}
       isPlacing={guess.isPending}
