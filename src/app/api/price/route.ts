@@ -1,3 +1,4 @@
+import { serviceUnavailable } from "@/lib/api/responses";
 import { getCurrentPrice, PriceUnavailableError } from "@/lib/price";
 
 /**
@@ -13,10 +14,7 @@ export async function GET() {
     return Response.json({ price: await getCurrentPrice() });
   } catch (error) {
     if (error instanceof PriceUnavailableError) {
-      return Response.json(
-        { error: "Price temporarily unavailable" },
-        { status: 503 },
-      );
+      return serviceUnavailable("Price temporarily unavailable");
     }
     throw error;
   }
