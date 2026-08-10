@@ -4,7 +4,11 @@ import { GetCommand, PutCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import type { ActiveGuess, LastResult, PlayerItem } from "@/lib/types";
 
 import { getDocumentClient, getTableName } from "./client";
-import { GuessAlreadyActiveError, GuessAlreadyResolvedError } from "./errors";
+import {
+  asStoreFailure,
+  GuessAlreadyActiveError,
+  GuessAlreadyResolvedError,
+} from "./errors";
 
 /**
  * All writes in this file are conditional. That is the whole point: "one guess at
@@ -22,23 +26,27 @@ const NAMES = {
   "#playerId": "playerId",
   "#score": "score",
   "#activeGuess": "activeGuess",
-  "#lastResult": "lastResult",
+  "#history": "history",
   "#updatedAt": "updatedAt",
   "#id": "id",
 } as const;
 
 async function getPlayer(playerId: string): Promise<PlayerItem | undefined> {
-  const result = await getDocumentClient().send(
-    new GetCommand({
-      TableName: getTableName(),
-      Key: { playerId },
-      // Resolution decides money-equivalent outcomes; a stale read could resolve
-      // a guess that another request already resolved.
-      ConsistentRead: true,
-    }),
-  );
+  try {
+    const result = await getDocumentClient().send(
+      new GetCommand({
+        TableName: getTableName(),
+        Key: { playerId },
+        // Resolution decides money-equivalent outcomes; a stale read could
+        // resolve a guess that another request already resolved.
+        ConsistentRead: true,
+      }),
+    );
 
-  return result.Item as PlayerItem | undefined;
+    return result.Item as PlayerItem | undefined;
+  } catch (error) {
+    throw asStoreFailure(error);
+  }
 }
 
 /**
@@ -71,7 +79,7 @@ export async function getOrCreatePlayer(playerId: string): Promise<PlayerItem> {
     );
     return fresh;
   } catch (error) {
-    if (!(error instanceof ConditionalCheckFailedException)) throw error;
+    if (!(error instanceof ConditionalCheckFailedException)) throw asStoreFailure(error);
 
     // Someone created this player between our read and our write. Theirs won.
     const winner = await getPlayer(playerId);
@@ -118,17 +126,30 @@ export async function createGuess(
     if (error instanceof ConditionalCheckFailedException) {
       throw new GuessAlreadyActiveError();
     }
-    throw error;
+    throw asStoreFailure(error);
   }
 }
 
 /**
- * Applies the outcome of a guess: adjusts the score, records the result and
- * clears the guess — in one atomic update, conditioned on the guess id.
+ * Applies the outcome of a guess: adjusts the score, prepends the result to the
+ * history and clears the guess — in one atomic update, conditioned on the guess
+ * id.
  *
  * That condition is what makes resolution idempotent. Two concurrent callers
  * both compute the same outcome; the first one's update removes `activeGuess`,
- * so the second one's condition fails and the score moves exactly once.
+ * so the second one's condition fails and the score moves — and the history
+ * grows — exactly once.
+ *
+ * `list_append(:result, history)` puts the new entry *first*, so the list is
+ * newest-first and the UI never has to reverse it. `if_not_exists` covers the
+ * player's very first resolution, when the attribute does not exist yet and a
+ * bare `list_append` would fail.
+ *
+ * The list is never trimmed here. DynamoDB cannot slice a list server-side, and
+ * appending plus removing the same attribute in one expression is rejected as
+ * overlapping paths — so bounding it would cost a second write on every single
+ * resolution. The ceiling is instead accepted and documented: at roughly 100
+ * bytes an entry, the 400 KB item limit lands near 4,000 guesses.
  *
  * @throws {GuessAlreadyResolvedError} when another caller got there first.
  */
@@ -144,18 +165,19 @@ export async function resolveGuess(
         TableName: getTableName(),
         Key: { playerId },
         UpdateExpression:
-          "SET #score = #score + :delta, #lastResult = :result, #updatedAt = :now REMOVE #activeGuess",
+          "SET #score = #score + :delta, #history = list_append(:result, if_not_exists(#history, :empty)), #updatedAt = :now REMOVE #activeGuess",
         ConditionExpression: "#activeGuess.#id = :guessId",
         ExpressionAttributeNames: {
           "#score": NAMES["#score"],
-          "#lastResult": NAMES["#lastResult"],
+          "#history": NAMES["#history"],
           "#updatedAt": NAMES["#updatedAt"],
           "#activeGuess": NAMES["#activeGuess"],
           "#id": NAMES["#id"],
         },
         ExpressionAttributeValues: {
           ":delta": delta,
-          ":result": lastResult,
+          ":result": [lastResult],
+          ":empty": [] as LastResult[],
           ":now": lastResult.resolvedAt,
           ":guessId": guessId,
         },
@@ -168,7 +190,7 @@ export async function resolveGuess(
     if (error instanceof ConditionalCheckFailedException) {
       throw new GuessAlreadyResolvedError();
     }
-    throw error;
+    throw asStoreFailure(error);
   }
 }
 
