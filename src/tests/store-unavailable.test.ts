@@ -91,6 +91,30 @@ describe("asStoreFailure — whose fault is it", () => {
   });
 
   /**
+   * The one failure the infrastructure is designed to cause. A $1 monthly
+   * budget action attaches an explicit Deny on dynamodb:* to the application's
+   * IAM user; the policy is detached at the start of the next budget period.
+   * That is an outage that ends by itself, so it must not read as a crash.
+   */
+  it("treats the cost breaker firing as the store being down", () => {
+    const denied = {
+      name: "AccessDeniedException",
+      $metadata: { httpStatusCode: 400 },
+    };
+
+    expect(asStoreFailure(denied)).toBeInstanceOf(DataStoreUnavailableError);
+  });
+
+  it.each(["UnrecognizedClientException", "InvalidSignatureException"])(
+    "lets %s through, because that is a broken deployment and not weather",
+    (name) => {
+      const misconfigured = { name, $metadata: { httpStatusCode: 403 } };
+
+      expect(asStoreFailure(misconfigured)).toBe(misconfigured);
+    },
+  );
+
+  /**
    * The important negative case. A malformed request is *our* bug, and dressing
    * it up as a transient outage would hide it behind a retry loop forever.
    */

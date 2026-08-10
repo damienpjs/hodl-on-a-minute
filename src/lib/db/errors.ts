@@ -40,7 +40,7 @@ export class DataStoreUnavailableError extends Error {
   }
 }
 
-const THROTTLING_ERRORS = new Set([
+const REFUSALS = new Set([
   "ThrottlingException",
   "ProvisionedThroughputExceededException",
   "RequestLimitExceeded",
@@ -48,15 +48,26 @@ const THROTTLING_ERRORS = new Set([
   // indistinguishable from the store being down, and it is certainly not a bad
   // request on their part.
   "ResourceNotFoundException",
+  // The cost breaker fired. A $1 monthly budget action attaches an explicit
+  // Deny on dynamodb:* to the application's IAM user, and the policy is
+  // detached again at the start of the next budget period — so this is an
+  // outage that ends by itself, not a bug. Retrying is free, because a denied
+  // request never reaches DynamoDB and so cannot spend anything.
+  //
+  // Credential failures are deliberately *not* here. UnrecognizedClientException
+  // and InvalidSignatureException mean the deployment is misconfigured, and that
+  // should stay a loud 500 rather than look like weather.
+  "AccessDeniedException",
 ]);
 
 /**
  * Decides whether a failure belongs to the store or to us, and returns the error
  * to throw.
  *
- * Deliberately narrow. A 4xx from DynamoDB means the request we built was wrong
- * — a bug — and is passed through untouched so it surfaces loudly as a 500.
- * Only a missing response, a 5xx, or a throttle become `DataStoreUnavailableError`.
+ * Deliberately narrow. A 4xx from DynamoDB usually means the request we built
+ * was wrong — a bug — and is passed through untouched so it surfaces loudly as a
+ * 500. Only a missing response, a 5xx, or one of the named refusals becomes
+ * `DataStoreUnavailableError`.
  */
 export function asStoreFailure(error: unknown): unknown {
   const candidate = error as {
@@ -71,10 +82,10 @@ export function asStoreFailure(error: unknown): unknown {
     typeof candidate?.code === "string" && candidate.code.startsWith("E");
   const timedOut = candidate?.name === "TimeoutError";
   const serviceFailure = typeof status === "number" && status >= 500;
-  const throttled =
-    typeof candidate?.name === "string" && THROTTLING_ERRORS.has(candidate.name);
+  const refused =
+    typeof candidate?.name === "string" && REFUSALS.has(candidate.name);
 
-  if (transportFailure || timedOut || serviceFailure || throttled) {
+  if (transportFailure || timedOut || serviceFailure || refused) {
     return new DataStoreUnavailableError({ cause: error });
   }
   return error;
