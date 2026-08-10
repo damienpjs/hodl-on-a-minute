@@ -2,8 +2,10 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 
 import { type GameState, toGameState } from "@/lib/api/game-state";
+import { serviceUnavailable } from "@/lib/api/responses";
 import {
   createGuess,
+  DataStoreUnavailableError,
   getOrCreatePlayer,
   getPlayer,
   GuessAlreadyActiveError,
@@ -58,29 +60,18 @@ export async function POST(request: Request) {
     );
   }
 
-  const player = await resolveCaller();
-
-  let entryPrice: number;
   try {
-    entryPrice = await getCurrentPrice();
-  } catch (error) {
-    if (error instanceof PriceUnavailableError) {
-      return Response.json(
-        { error: "Cannot price a guess right now — try again shortly" },
-        { status: 503 },
-      );
-    }
-    throw error;
-  }
+    const player = await resolveCaller();
 
-  const guess: ActiveGuess = {
-    id: randomUUID(),
-    direction: parsed.data.direction,
-    entryPrice,
-    entryAt: Date.now(),
-  };
+    // Both produced here, on the server, after the body has been parsed. There
+    // is no moment at which a client-supplied value could reach them.
+    const guess: ActiveGuess = {
+      id: randomUUID(),
+      direction: parsed.data.direction,
+      entryPrice: await getCurrentPrice(),
+      entryAt: Date.now(),
+    };
 
-  try {
     const updated = await createGuess(player.playerId, guess);
     return Response.json(toGameState(updated), { status: 201 });
   } catch (error) {
@@ -91,6 +82,12 @@ export async function POST(request: Request) {
         { error: "A guess is already in flight" },
         { status: 409 },
       );
+    }
+    if (error instanceof PriceUnavailableError) {
+      return serviceUnavailable("Cannot price a guess right now — try again shortly");
+    }
+    if (error instanceof DataStoreUnavailableError) {
+      return serviceUnavailable("Cannot reach the data store — try again shortly");
     }
     throw error;
   }
@@ -104,41 +101,52 @@ export async function POST(request: Request) {
  * for three days and still get a fair answer when they come back.
  */
 export async function GET() {
-  const player = await resolveCaller();
-  const guess = player.activeGuess;
-
-  if (!guess) return Response.json(toGameState(player));
-
-  let outcome;
   try {
-    outcome = await resolveOutcome(guess, binancePriceSource, Date.now());
-  } catch (error) {
-    if (error instanceof PriceUnavailableError) {
-      // Stay pending and say so. Resolving on a price we could not read would
-      // be the one unforgivable bug in this app.
-      const state: GameState = { ...toGameState(player), priceUnavailable: true };
-      return Response.json(state);
+    const player = await resolveCaller();
+    const guess = player.activeGuess;
+
+    if (!guess) return Response.json(toGameState(player));
+
+    let outcome;
+    try {
+      outcome = await resolveOutcome(guess, binancePriceSource, Date.now());
+    } catch (error) {
+      if (error instanceof PriceUnavailableError) {
+        // Stay pending and say so — 200, not 503: the guess is intact and the
+        // state is worth reading. Resolving on a price we could not read would
+        // be the one unforgivable bug in this app.
+        const state: GameState = { ...toGameState(player), priceUnavailable: true };
+        return Response.json(state);
+      }
+      throw error;
     }
-    throw error;
-  }
 
-  if (outcome.status === "pending") return Response.json(toGameState(player));
+    if (outcome.status === "pending") return Response.json(toGameState(player));
 
-  try {
-    const updated = await resolveGuess(player.playerId, guess.id, outcome.delta, {
-      direction: guess.direction,
-      entryPrice: guess.entryPrice,
-      resolvedPrice: outcome.resolvedPrice,
-      delta: outcome.delta,
-      resolvedAt: outcome.resolvedAt,
-    });
-    return Response.json(toGameState(updated));
+    try {
+      const updated = await resolveGuess(player.playerId, guess.id, outcome.delta, {
+        direction: guess.direction,
+        entryPrice: guess.entryPrice,
+        resolvedPrice: outcome.resolvedPrice,
+        delta: outcome.delta,
+        resolvedAt: outcome.resolvedAt,
+      });
+      return Response.json(toGameState(updated));
+    } catch (error) {
+      // A concurrent request resolved it first. The work is done and the score
+      // already moved exactly once, so re-read and answer 200 rather than
+      // erroring.
+      if (error instanceof GuessAlreadyResolvedError) {
+        const fresh = await getPlayer(player.playerId);
+        return Response.json(toGameState(fresh ?? player));
+      }
+      throw error;
+    }
   } catch (error) {
-    // A concurrent request resolved it first. The work is done and the score
-    // already moved exactly once, so re-read and answer 200 rather than erroring.
-    if (error instanceof GuessAlreadyResolvedError) {
-      const fresh = await getPlayer(player.playerId);
-      return Response.json(toGameState(fresh ?? player));
+    // Nothing above could be read or written at all. Unlike the price outage,
+    // there is no state to return, so the caller is told to come back.
+    if (error instanceof DataStoreUnavailableError) {
+      return serviceUnavailable("Cannot reach the data store — try again shortly");
     }
     throw error;
   }
