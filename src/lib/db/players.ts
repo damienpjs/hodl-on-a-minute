@@ -4,7 +4,11 @@ import { GetCommand, PutCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import type { ActiveGuess, LastResult, PlayerItem } from "@/lib/types";
 
 import { getDocumentClient, getTableName } from "./client";
-import { GuessAlreadyActiveError, GuessAlreadyResolvedError } from "./errors";
+import {
+  asStoreFailure,
+  GuessAlreadyActiveError,
+  GuessAlreadyResolvedError,
+} from "./errors";
 
 /**
  * All writes in this file are conditional. That is the whole point: "one guess at
@@ -28,17 +32,21 @@ const NAMES = {
 } as const;
 
 async function getPlayer(playerId: string): Promise<PlayerItem | undefined> {
-  const result = await getDocumentClient().send(
-    new GetCommand({
-      TableName: getTableName(),
-      Key: { playerId },
-      // Resolution decides money-equivalent outcomes; a stale read could resolve
-      // a guess that another request already resolved.
-      ConsistentRead: true,
-    }),
-  );
+  try {
+    const result = await getDocumentClient().send(
+      new GetCommand({
+        TableName: getTableName(),
+        Key: { playerId },
+        // Resolution decides money-equivalent outcomes; a stale read could
+        // resolve a guess that another request already resolved.
+        ConsistentRead: true,
+      }),
+    );
 
-  return result.Item as PlayerItem | undefined;
+    return result.Item as PlayerItem | undefined;
+  } catch (error) {
+    throw asStoreFailure(error);
+  }
 }
 
 /**
@@ -71,7 +79,7 @@ export async function getOrCreatePlayer(playerId: string): Promise<PlayerItem> {
     );
     return fresh;
   } catch (error) {
-    if (!(error instanceof ConditionalCheckFailedException)) throw error;
+    if (!(error instanceof ConditionalCheckFailedException)) throw asStoreFailure(error);
 
     // Someone created this player between our read and our write. Theirs won.
     const winner = await getPlayer(playerId);
@@ -118,7 +126,7 @@ export async function createGuess(
     if (error instanceof ConditionalCheckFailedException) {
       throw new GuessAlreadyActiveError();
     }
-    throw error;
+    throw asStoreFailure(error);
   }
 }
 
@@ -182,7 +190,7 @@ export async function resolveGuess(
     if (error instanceof ConditionalCheckFailedException) {
       throw new GuessAlreadyResolvedError();
     }
-    throw error;
+    throw asStoreFailure(error);
   }
 }
 

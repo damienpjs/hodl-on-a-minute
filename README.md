@@ -41,6 +41,47 @@ Next.js 16 (App Router) · React 19 · TypeScript 5 · Tailwind 4 + shadcn/ui ·
 TanStack Query · Zod · AWS DynamoDB · Binance public API · Vitest + Testing Library ·
 deployed on Vercel.
 
+## Infrastructure
+
+Provisioned and verified end to end: a guess placed in the browser is priced from Binance
+server-side, written to DynamoDB in `eu-central-1`, and resolved sixty seconds later
+against a fresh price — with the application authenticating as an identity that can do
+three things and nothing else.
+
+**One table, on-demand.** `hodl-on-a-minute-players`, partition key `playerId`,
+`PAY_PER_REQUEST` billing. It is the same schema
+[`scripts/create-local-table.mjs`](scripts/create-local-table.mjs) creates, so DynamoDB
+Local and the real service are interchangeable: the only thing that differs between them
+is `DYNAMODB_ENDPOINT`, and an empty value means "the real regional endpoint" rather than
+"misconfigured".
+
+**Two identities, split by purpose.** Provisioning ran under an administrator user whose
+access keys were deleted once the resources existed — the identity remains, it simply has
+no credentials left to use. The application authenticates as `hodl-app`, whose inline
+policy allows exactly `GetItem`, `PutItem` and `UpdateItem` on that single table's ARN.
+Not `dynamodb:*`, not `Resource: "*"`, and deliberately no `Scan` — which is what makes
+the "no leaderboard" limitation below an actual constraint rather than a stylistic
+preference. The root account carries a WebAuthn passkey for MFA and holds no access keys.
+
+**Cost control is layered, because AWS has no hard spending cap.** Three layers, in
+increasing order of severity: a zero-spend budget that emails on the first cent, Free
+Tier and CloudWatch billing alerts, and a $1 monthly budget whose action automatically
+attaches an explicit `Deny` on `dynamodb:*` to `hodl-app`. That last one takes the demo
+down rather than let a bill run — the right trade for a portfolio deployment. The applied
+policy is detached automatically at the start of each budget period, so the breaker
+re-arms itself instead of needing to be replaced.
+
+Two honest caveats on that breaker. Budget actions are evaluated against cost data that
+lags by hours, so it is a slow fuse, not a cap: spend can accrue past the threshold before
+it fires. And IAM denials do not apply to the root user, which is precisely why root MFA
+is not optional here.
+
+**The account is on pay-as-you-go rather than the credit-limited free plan.** The free
+plan cannot be billed but expires on a fixed date, which would quietly kill the public
+demo. Expected cost is nil either way: this workload sits several orders of magnitude
+inside DynamoDB's permanent free allowance, so the budget guards against mistakes, not
+against normal operation.
+
 ## Known limitations
 
 **Guess history is bounded by the item, not by a table.** Resolved guesses are prepended
