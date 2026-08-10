@@ -1,7 +1,8 @@
 /**
- * Both of these are *expected* outcomes of a conditional write, not faults.
+ * The first two are *expected* outcomes of a conditional write, not faults.
  * They exist so the API routes can map a lost race to the right HTTP status
- * without inspecting AWS SDK internals.
+ * without inspecting AWS SDK internals. The third says the store itself is the
+ * problem, which is a different answer to the caller entirely.
  */
 
 /** A guess was already in flight. The caller should answer 409. */
@@ -21,4 +22,71 @@ export class GuessAlreadyResolvedError extends Error {
     super("This guess was already resolved");
     this.name = "GuessAlreadyResolvedError";
   }
+}
+
+/**
+ * The data store could not be reached, or refused to serve us. Transient by
+ * assumption, so the caller answers 503 and invites a retry — as opposed to a
+ * 500, which tells the player nothing and tells us it was our own bug.
+ *
+ * This is the counterpart of `PriceUnavailableError` on the price side. Both
+ * exist for the same reason: "we do not know" must be distinguishable from "we
+ * know, and the answer is no".
+ */
+export class DataStoreUnavailableError extends Error {
+  constructor(options?: { cause?: unknown }) {
+    super("The data store is unavailable", options);
+    this.name = "DataStoreUnavailableError";
+  }
+}
+
+const REFUSALS = new Set([
+  "ThrottlingException",
+  "ProvisionedThroughputExceededException",
+  "RequestLimitExceeded",
+  // The table is gone or misconfigured. From a caller's point of view that is
+  // indistinguishable from the store being down, and it is certainly not a bad
+  // request on their part.
+  "ResourceNotFoundException",
+  // The cost breaker fired. A $1 monthly budget action attaches an explicit
+  // Deny on dynamodb:* to the application's IAM user, and the policy is
+  // detached again at the start of the next budget period — so this is an
+  // outage that ends by itself, not a bug. Retrying is free, because a denied
+  // request never reaches DynamoDB and so cannot spend anything.
+  //
+  // Credential failures are deliberately *not* here. UnrecognizedClientException
+  // and InvalidSignatureException mean the deployment is misconfigured, and that
+  // should stay a loud 500 rather than look like weather.
+  "AccessDeniedException",
+]);
+
+/**
+ * Decides whether a failure belongs to the store or to us, and returns the error
+ * to throw.
+ *
+ * Deliberately narrow. A 4xx from DynamoDB usually means the request we built
+ * was wrong — a bug — and is passed through untouched so it surfaces loudly as a
+ * 500. Only a missing response, a 5xx, or one of the named refusals becomes
+ * `DataStoreUnavailableError`.
+ */
+export function asStoreFailure(error: unknown): unknown {
+  const candidate = error as {
+    name?: string;
+    code?: string;
+    $metadata?: { httpStatusCode?: number };
+  };
+
+  const status = candidate?.$metadata?.httpStatusCode;
+
+  const transportFailure =
+    typeof candidate?.code === "string" && candidate.code.startsWith("E");
+  const timedOut = candidate?.name === "TimeoutError";
+  const serviceFailure = typeof status === "number" && status >= 500;
+  const refused =
+    typeof candidate?.name === "string" && REFUSALS.has(candidate.name);
+
+  if (transportFailure || timedOut || serviceFailure || refused) {
+    return new DataStoreUnavailableError({ cause: error });
+  }
+  return error;
 }
