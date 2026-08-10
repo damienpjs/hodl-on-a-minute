@@ -17,7 +17,7 @@ function renderBoard(overrides: Partial<GameBoardProps> = {}) {
     ticks: [],
     now: ENTRY_AT,
     onGuess,
-    isPlacing: false,
+    placing: null,
     actionError: null,
     ...overrides,
   };
@@ -65,10 +65,35 @@ describe("GameBoard — placing a guess", () => {
   });
 
   it("locks the buttons while the guess is still being submitted", () => {
-    renderBoard({ isPlacing: true });
+    renderBoard({ placing: "up" });
 
     expect(screen.getByRole("button", { name: /up/i })).toBeDisabled();
     expect(screen.getByText(/placing your guess/i)).toBeInTheDocument();
+  });
+});
+
+describe("GameBoard — which direction is lit", () => {
+  it("leaves both directions idle while nothing is in flight", () => {
+    renderBoard();
+
+    expect(screen.getByTestId("direction-up")).toHaveAttribute("data-state", "idle");
+    expect(screen.getByTestId("direction-down")).toHaveAttribute("data-state", "idle");
+  });
+
+  it("lights the direction being submitted before the server has answered", () => {
+    renderBoard({ placing: "down" });
+
+    // The click has to feel acknowledged during the round trip, otherwise the
+    // only feedback is both buttons greying out at once.
+    expect(screen.getByTestId("direction-down")).toHaveAttribute("data-state", "chosen");
+    expect(screen.getByTestId("direction-up")).toHaveAttribute("data-state", "dimmed");
+  });
+
+  it("keeps the guessed direction lit for the whole minute that follows", () => {
+    renderBoard(withGuess(ENTRY_AT + 10_000));
+
+    expect(screen.getByTestId("direction-up")).toHaveAttribute("data-state", "chosen");
+    expect(screen.getByTestId("direction-down")).toHaveAttribute("data-state", "dimmed");
   });
 });
 
