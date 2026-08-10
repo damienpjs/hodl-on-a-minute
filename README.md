@@ -76,6 +76,16 @@ lags by hours, so it is a slow fuse, not a cap: spend can accrue past the thresh
 it fires. And IAM denials do not apply to the root user, which is precisely why root MFA
 is not optional here.
 
+**The deployment region is pinned to Frankfurt, and not for latency reasons alone.**
+Binance answers `451 Unavailable For Legal Reasons` to requests from US IP addresses, and
+Vercel's default function region is `iad1`, in Washington. Every guess on the first
+deployment therefore failed with a 503 — correctly, since `isRetryableStatus` retries only
+5xx and a 451 is a jurisdiction, not a hiccup. Pinning the functions to `fra1` in
+[`vercel.json`](vercel.json) fixes it, and lands them in `eu-central-1`: the same region as
+the table, so every DynamoDB call is intra-region instead of transatlantic. Keeping the
+region in the repository rather than only in the dashboard means it survives the project
+being recreated, and is visible to anyone reading the code.
+
 **The account is on pay-as-you-go rather than the credit-limited free plan.** The free
 plan cannot be billed but expires on a fixed date, which would quietly kill the public
 demo. Expected cost is nil either way: this workload sits several orders of magnitude
