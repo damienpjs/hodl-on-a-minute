@@ -106,9 +106,19 @@ export function computeGeometry({
     VIEW_H - ((price - yMin) / (yMax - yMin)) * VIEW_H;
   const toTopPct = (price: number) => (toY(price) / VIEW_H) * 100;
 
-  const points = visible.map((tick) => `${toX(tick.at)},${toY(tick.price)}`);
+  // In the first two minutes the feed has not filled the window yet, and the
+  // trace would start mid-frame against a stretch of empty background. Holding
+  // the oldest sample flat back to the left edge fills the frame. The segment is
+  // flat because we have no data there, not because the market stood still — it
+  // carries no price of its own, so it cannot move the domain or mislead about a
+  // direction.
   const first = visible[0];
-  const last = visible[visible.length - 1];
+  const trace =
+    first.at > from ? [{ at: from, price: first.price }, ...visible] : visible;
+
+  const points = trace.map((tick) => `${toX(tick.at)},${toY(tick.price)}`);
+  const start = trace[0];
+  const last = trace[trace.length - 1];
 
   const targetAt = entryAt === undefined ? null : entryAt + RESOLUTION_DELAY_MS;
   const targetIsVisible = targetAt !== null && targetAt >= from && targetAt <= now;
@@ -128,7 +138,7 @@ export function computeGeometry({
 
   return {
     line: points.join(" "),
-    area: `M ${toX(first.at)},${VIEW_H} L ${points.join(" L ")} L ${toX(last.at)},${VIEW_H} Z`,
+    area: `M ${toX(start.at)},${VIEW_H} L ${points.join(" L ")} L ${toX(last.at)},${VIEW_H} Z`,
     entryY: entryPrice === undefined ? null : toY(entryPrice),
     entryTopPct: entryPrice === undefined ? null : toTopPct(entryPrice),
     targetX: targetIsVisible ? toX(targetAt) : null,
