@@ -13,6 +13,12 @@ import type { LastResult } from "@/lib/types";
 
 const ENTRY_AT = 1_700_000_000_000;
 
+/** Enough samples for the chart to draw at all — it renders nothing under two. */
+const TICKS = [
+  { at: ENTRY_AT - 30_000, price: 64_900 },
+  { at: ENTRY_AT, price: 65_000 },
+];
+
 function renderBoard(overrides: Partial<GameBoardProps> = {}) {
   const onGuess = vi.fn();
 
@@ -119,6 +125,55 @@ describe("GameBoard — which direction is lit", () => {
     renderBoard(withGuess(ENTRY_AT + 42_000));
 
     expect(screen.getByTestId("direction-down")).toHaveTextContent(/locked 18s/i);
+  });
+});
+
+describe("GameBoard — clearing the screen for the round", () => {
+  it("keeps the controls on screen while there is something to click", () => {
+    renderBoard();
+
+    expect(screen.getByTestId("controls")).toHaveAttribute("data-hidden", "false");
+  });
+
+  it("slides the controls away once the guess is placed", () => {
+    renderBoard(withGuess(ENTRY_AT + 10_000));
+
+    // Nothing in that row is actionable during a round, so it costs the player
+    // nothing — and it buys back the bottom of the display for the countdown
+    // and the chart, which is the only thing they can still act on: watching.
+    expect(screen.getByTestId("controls")).toHaveAttribute("data-hidden", "true");
+  });
+
+  it("slides them away on the click, not on the server's answer", () => {
+    renderBoard({ placing: "up" });
+
+    expect(screen.getByTestId("controls")).toHaveAttribute("data-hidden", "true");
+  });
+
+  it("never shows the entry line and the controls at the same time", () => {
+    // The reason the slide-out is a fix and not just a flourish. The entry line
+    // is drawn at whatever height its price maps to, so it *will* cross the
+    // controls row eventually — unless the two are mutually exclusive, which
+    // they are: one needs an active guess, the other needs the absence of one.
+    renderBoard({ ...withGuess(ENTRY_AT + 10_000), ticks: TICKS });
+
+    expect(screen.getByTestId("entry-line")).toBeInTheDocument();
+    expect(screen.getByTestId("controls")).toHaveAttribute("data-hidden", "true");
+
+    cleanup();
+
+    renderBoard({ ticks: TICKS });
+
+    expect(screen.queryByTestId("entry-line")).not.toBeInTheDocument();
+    expect(screen.getByTestId("controls")).toHaveAttribute("data-hidden", "false");
+  });
+
+  it("still announces why nothing can be clicked", () => {
+    renderBoard(withGuess(ENTRY_AT + 10_000));
+
+    // The rule is obvious on screen — the buttons are gone — but "gone" does
+    // not survive being read aloud.
+    expect(screen.getByText(/one guess at a time/i)).toBeInTheDocument();
   });
 });
 
