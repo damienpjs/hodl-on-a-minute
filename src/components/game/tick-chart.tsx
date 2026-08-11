@@ -295,7 +295,16 @@ function Wallpaper({
           after it is meant to be read. */}
       <div className="arcade-scrim absolute inset-0" data-testid="chart-scrim" />
 
-      {/* 3 — the guides. */}
+      {/*
+        3 — the guides, across the full height of the frame.
+
+        They do run under the controls row while it is on screen, and that is
+        accepted rather than overlooked: a grey hairline and a 10px price behind
+        a card with its own surface is a texture, not a collision. The mark that
+        genuinely could not share a pixel with a button — the amber entry line —
+        only exists while a round is live, which is exactly when that row has
+        left the screen.
+      */}
       <svg
         viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
         preserveAspectRatio="none"
