@@ -6,11 +6,12 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "db:local:up": "docker start hodl-ddb || docker run -d -p 8000:8000 --name hodl-ddb amazon/dynamodb-local",
+    "db:local:up": "docker start hodl-ddb || docker run -d -p 8000:8000 --name hodl-ddb amazon/dynamodb-local:3.3.1",
     "db:local": "node scripts/create-local-table.mjs",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:ci": "vitest run --reporter=default --reporter=json --outputFile.json=vitest-report.json && node scripts/assert-no-skipped-tests.mjs vitest-report.json",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "check": "npm run lint && npm run typecheck && npm run test:coverage"

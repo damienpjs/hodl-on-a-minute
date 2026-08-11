@@ -61,6 +61,7 @@ Vitest + Testing Library · deployed on Vercel.
 | `npm run lint`          | ESLint                             |
 | `npm run typecheck`     | `tsc --noEmit`                     |
 | `npm test`              | Vitest, single run                 |
+| `npm run test:ci`       | Vitest, then fail on any skip      |
 | `npm run test:coverage` | Vitest with coverage               |
 | `npm run check`         | lint + typecheck + tests, in order |
 
@@ -86,5 +87,11 @@ Priority order: `canResolve` and `computeDelta` edge cases → historical resolu
 the concurrency guarantees (double POST returns 409, double resolve increments once) →
 the test proving a client-supplied `price` is ignored. That last one is the most
 valuable test in the project: it documents a security decision while verifying it.
+
+The two DynamoDB-backed suites may skip on a machine without the container — that is
+deliberate ergonomics. They may **never** skip in CI: the workflow sets
+`REQUIRE_DYNAMODB=1`, which turns a missing container into a failed run, and
+`npm run test:ci` fails on any skipped test at all. A green check has to mean every test
+ran.
 
 @AGENTS.md
