@@ -89,6 +89,51 @@ describe("computeGeometry", () => {
     expect(geometry!.entryY!).toBeLessThanOrEqual(300);
   });
 
+  it("keeps the entry inside the frame at any scale, not just a wide one", () => {
+    // A market that has barely moved and one that has moved 8% — the domain is
+    // rebuilt from scratch in both, and the entry has to survive both.
+    for (const prices of [
+      [65_000, 65_000.4, 65_000.2],
+      [65_000, 68_000, 70_400],
+    ]) {
+      const geometry = computeGeometry({
+        ticks: ticks(prices),
+        entryPrice: 65_000,
+        now: NOW,
+      })!;
+
+      expect(geometry.entryY).toBeGreaterThan(0);
+      expect(geometry.entryY).toBeLessThan(300);
+    }
+  });
+
+  it("drops a price level that would be drawn on top of the entry line", () => {
+    const withoutEntry = computeGeometry({
+      ticks: ticks([65_000, 65_400]),
+      now: NOW,
+    })!;
+
+    // Put the entry exactly on one of the round levels the grid would draw.
+    const collides = withoutEntry.levels[0].price;
+    const withEntry = computeGeometry({
+      ticks: ticks([65_000, 65_400]),
+      entryPrice: collides,
+      now: NOW,
+    })!;
+
+    expect(withoutEntry.levels.map((l) => l.price)).toContain(collides);
+    expect(withEntry.levels.map((l) => l.price)).not.toContain(collides);
+  });
+
+  it("drops levels whose label would hang off the edge of the frame", () => {
+    const geometry = computeGeometry({ ticks: ticks([65_000, 65_400]), now: NOW })!;
+
+    for (const level of geometry.levels) {
+      expect(level.topPct).toBeGreaterThanOrEqual(7);
+      expect(level.topPct).toBeLessThanOrEqual(93);
+    }
+  });
+
   it("survives a flat market instead of dividing by a zero-height domain", () => {
     const geometry = computeGeometry({ ticks: ticks([65_000, 65_000]), now: NOW });
 
@@ -136,5 +181,72 @@ describe("TickChart", () => {
     render(<TickChart ticks={ticks([65_000, 65_100])} now={NOW} />);
 
     expect(screen.getByTestId("tick-chart")).toHaveAttribute("aria-hidden", "true");
+  });
+
+  it("labels its price levels in both variants", () => {
+    const props = { ticks: ticks([65_000, 65_400]), now: NOW };
+
+    const { rerender } = render(<TickChart {...props} />);
+    expect(screen.getAllByTestId("price-level").length).toBeGreaterThan(0);
+
+    rerender(<TickChart {...props} variant="wallpaper" />);
+
+    const levels = screen.getAllByTestId("price-level");
+    expect(levels.length).toBeGreaterThan(0);
+    // Behind the board the label is a bare round number: the currency is stated
+    // three times over on the rest of the screen, and the cents are always .00.
+    expect(levels[0]).not.toHaveTextContent("$");
+    // One rule drawn per number, never a label floating on its own.
+    expect(screen.getAllByTestId("price-rule")).toHaveLength(levels.length);
+  });
+
+  it("keeps the guides above the scrim and the trace below it", () => {
+    render(
+      <TickChart
+        ticks={ticks([65_000, 65_400])}
+        entryPrice={65_050}
+        now={NOW}
+        variant="wallpaper"
+      />,
+    );
+
+    const order = [...screen.getByTestId("tick-chart").children].map((node) =>
+      node.getAttribute("data-testid"),
+    );
+
+    // This is the whole reason the wallpaper is three layers rather than two.
+    // The scrim is there to hold back a decorative squiggle; a dashed rule the
+    // player reads a price off must not be behind it, or a 50-to-86% wash takes
+    // it down to nothing.
+    expect(order.indexOf("tick-chart-trace")).toBeLessThan(
+      order.indexOf("chart-scrim"),
+    );
+    expect(order.indexOf("chart-scrim")).toBeLessThan(
+      order.indexOf("tick-chart-guides"),
+    );
+  });
+
+  it("gives the entry line more weight than the grid it crosses", () => {
+    render(
+      <TickChart
+        ticks={ticks([65_000, 65_400])}
+        entryPrice={65_050}
+        now={NOW}
+        variant="wallpaper"
+      />,
+    );
+
+    const entry = screen.getByTestId("entry-line");
+    const rule = screen.getAllByTestId("price-rule")[0];
+
+    // Three levers at once — colour, weight, dash — so the two never read as
+    // the same kind of mark. The entry is the only line here with a point
+    // riding on it.
+    expect(entry.getAttribute("class")).toContain("arcade-amber");
+    expect(rule.getAttribute("class")).toContain("arcade-quiet");
+    expect(Number(entry.getAttribute("stroke-width"))).toBeGreaterThan(
+      Number(rule.getAttribute("stroke-width")),
+    );
+    expect(screen.getByTestId("entry-label")).toHaveTextContent(/entry/i);
   });
 });
