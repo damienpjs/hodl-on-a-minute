@@ -1,6 +1,7 @@
 "use client"
 
 import { ArrowDown, ArrowRight, ArrowUp, Loader2, X } from "lucide-react"
+import Image from "next/image"
 import { useEffect, useState } from "react"
 
 import { GuessHistory } from "@/components/game/guess-history"
@@ -42,11 +43,13 @@ import { cn } from "@/lib/utils"
  *    called out as a signed pill. This is the arithmetic the player is doing in
  *    their head, so the screen does it for them.
  * 3. **Up and Down are the primary target**, not a footnote: two 92px slabs
- *    across the bottom. The one you picked stays lit; the other goes dark and
- *    says how long it is locked for.
+ *    across the bottom — and then they leave. The whole bottom row slides out
+ *    the moment a guess is placed, because none of it is actionable until the
+ *    round resolves, and a screen with no buttons on it says "one guess at a
+ *    time" more plainly than a greyed-out button ever did.
  * 4. **The chart becomes wallpaper.** It is context, not content — it never
- *    tells you anything you must read, so it goes behind everything at 60%
- *    under a veil, where it still shows the shape of the last two minutes.
+ *    tells you anything you must read, so it goes behind everything under a
+ *    scrim, where it still shows the shape of the last two minutes.
  */
 
 export type GameBoardProps = {
@@ -155,9 +158,19 @@ export function GameBoard({ state, price, priceStatus, ticks, now, onGuess, plac
                 than the amber: it is read once, on arrival, and then it is
                 furniture — giving it the accent colour would put it in
                 competition with the title it explains. */}
-            <div>
-              <h1 className="font-mono text-[11px] font-bold tracking-[0.22em] text-[var(--arcade-amber)] uppercase sm:text-[13px]">{siteMetadata.title}</h1>
-              <p className="mt-1 font-mono text-[9px] font-medium tracking-[0.14em] text-[var(--arcade-dim)] uppercase sm:text-[10px]">{siteMetadata.description}</p>
+            <div className="flex items-center gap-2.5 sm:gap-3">
+              {/* The same file the tab loads — see `@/lib/metadata`. `alt=""`
+                  because the `h1` beside it already says the name, and a mark
+                  that repeats its own label out loud is noise to a screen
+                  reader. `unoptimized` because there is nothing to optimise:
+                  the optimiser refuses SVG by default, and this one is under a
+                  kilobyte. The rounded corners are the artwork's own, so
+                  nothing here clips it. */}
+              <Image src="/logo.svg" alt="" width={64} height={64} unoptimized priority className="size-8 shrink-0 sm:size-9" />
+              <div>
+                <h1 className="font-mono text-[11px] font-bold tracking-[0.22em] text-[var(--arcade-amber)] uppercase sm:text-[13px]">{siteMetadata.title}</h1>
+                <p className="mt-1 font-mono text-[9px] font-medium tracking-[0.14em] text-[var(--arcade-dim)] uppercase sm:text-[10px]">{siteMetadata.description}</p>
+              </div>
             </div>
 
             <div className="flex items-center gap-3 sm:gap-4">
@@ -195,17 +208,71 @@ export function GameBoard({ state, price, priceStatus, ticks, now, onGuess, plac
             ratio, which is what stops the score card from turning into a sliver
             next to two 500px buttons on a wide screen.
           */}
-          <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-[minmax(14.25rem,3fr)_5fr_5fr]">
+          {/*
+            ## Why this row leaves the screen while a round runs
+
+            Every control in it is disabled between the moment a guess is placed
+            and the moment it resolves, so sliding it out costs the player
+            nothing they could have acted on — and it buys back the bottom
+            quarter of the display for the one thing they *are* watching.
+
+            It also settles a collision that has no good answer otherwise: the
+            entry line is drawn at whatever height its price maps to, and that
+            height is data, so sooner or later it lands exactly across these
+            three cards — an amber rule through the word DOWN. Reserving space
+            for the row inside the chart's scale would have squashed the trace
+            permanently to solve a problem that only exists while a round is
+            live. Taking the row away instead solves it exactly when it occurs,
+            and for free: the entry line and this row are never on screen
+            together, by construction rather than by arrangement.
+
+            The row keeps its space in the layout and only moves: collapsing it
+            would re-centre the countdown mid-round, which is a jump in the one
+            element that must look like it is not moving.
+
+            Mounted and merely translated, not unmounted — it is still a
+            disabled control that a screen reader should be able to find, and
+            the "one guess at a time" status below still explains why.
+          */}
+          {/*
+            Two things here are load-bearing and neither is obvious.
+
+            `transition-[translate,opacity]`, not `transform`: Tailwind v4
+            compiles `translate-y-*` to the independent `translate` property
+            rather than to `transform`. A transition listing `transform` watches
+            a property nothing is changing, so the row teleports off screen and
+            only its opacity fades — which, once it has already teleported,
+            looks exactly like no animation at all.
+
+            `translate-y-0` on the base, not just `translate-y-[130%]` on the
+            hidden state: with no translate utility at all the computed value is
+            `none`, and `none` does not interpolate to a length any more than
+            `display` does. Both ends have to be real values for there to be
+            anything in between.
+          */}
+          <div
+            className={cn(
+              "grid translate-y-0 grid-cols-2 gap-3 transition-[translate,opacity] duration-500 ease-out sm:gap-4 md:grid-cols-[minmax(14.25rem,3fr)_5fr_5fr]",
+              "motion-reduce:transition-none",
+              // 130%, not 100%: the row has to clear its own drop shadow and the
+              // frame's bottom padding, or a sliver of green stays on screen.
+              isLocked && "pointer-events-none translate-y-[130%] opacity-0",
+            )}
+            data-testid="controls"
+            data-hidden={isLocked ? "true" : "false"}
+          >
             <ScoreCard score={state.score} history={state.history} historyOpen={historyOpen} onToggleHistory={() => setHistoryOpen((open) => !open)} />
             <DirectionButton direction="up" chosen={chosen} locked={isLocked} isPlacing={placing === "up"} remainingSeconds={remainingSeconds} onClick={onGuess} />
             <DirectionButton direction="down" chosen={chosen} locked={isLocked} isPlacing={placing === "down"} remainingSeconds={remainingSeconds} onClick={onGuess} />
           </div>
 
           {/*
-            The rule is already stated three ways on screen — one button lit, the
-            other dark, and the word LOCKED under it — so repeating it in visible
-            copy would be the fourth. It is still announced, because none of
-            those three survive being read aloud.
+            On screen the rule needs no words at all: there is nothing left to
+            click. That is the clearest statement of it the interface can make,
+            and it is the one that survives being read aloud least well — an
+            element that has slid out of view is still in the accessibility
+            tree, so "there are no buttons" is not a thing a screen reader can
+            notice. Hence this.
 
             Only for a guess that is already placed. The in-flight case is spoken
             by the verdict line, which is a live region for exactly that reason;
