@@ -538,7 +538,9 @@ DynamoDB's permanent free allowance, so the budget guards against mistakes, not 
 normal operation.
 
 **CI** runs on every push to every branch ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)):
-lint, `next typegen`, typecheck, tests. The typegen step is not optional — `layout.tsx`
+lint, `next typegen`, typecheck, then the full test suite against a DynamoDB Local service
+container — including the concurrency and fairness tests, which are refused the right to
+skip there (see [Testing](#testing)). The typegen step is not optional — `layout.tsx`
 uses `LayoutProps`, which Next generates into the git-ignored `.next/types`, and on a
 clean checkout typechecking fails before reaching a line of our own code.
 
@@ -576,12 +578,26 @@ separator inside the id), the Binance wrapper (string prices, index 4, retry pol
 weather and what is our bug), and the UI states.
 
 The two integration suites **skip themselves** when nothing answers on
-`DYNAMODB_ENDPOINT`, so `npm test` stays green on a machine — or a CI runner — without the
-container. To actually run them:
+`DYNAMODB_ENDPOINT`, so `npm test` stays green on a machine without the container. To run
+them locally:
 
 ```bash
 npm run db:local:up && npm test
 ```
+
+That ergonomics stops at the edge of a developer's terminal. A skip is invisible in a
+green check, so **CI is not allowed one**: the workflow runs DynamoDB Local as a service
+container, waits for the port, and sets `REQUIRE_DYNAMODB=1` — which turns "no container
+here" from a skip into a failed run. On top of it, `npm run test:ci` fails on _any_
+skipped test, including an `it.skip` left behind in a commit
+([`scripts/assert-no-skipped-tests.mjs`](scripts/assert-no-skipped-tests.mjs)). Vitest
+already covers the symmetrical mistake, since `allowOnly` defaults to `!CI` and a stray
+`it.only` therefore fails CI on its own. Green on this repo means 126 tests ran, not 112.
+
+The emulator, rather than real AWS, is a deliberate line: it is the same conditional-write
+engine, it needs no credentials in CI, and it works on pull requests from forks. What it
+cannot prove is IAM, region and credential wiring — which is why that boundary is verified
+separately by calling it, in [`deploy-check`](.claude/commands/deploy-check.md).
 
 Only two things are faked in the route tests: the cookie store, because `next/headers`
 needs a request scope that does not exist outside a server, and the price source, so the

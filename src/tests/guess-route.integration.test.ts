@@ -12,7 +12,9 @@
  * we pass a ConditionExpression, never that it holds.
  *
  * The suite skips itself when nothing answers on the endpoint, so `npm test`
- * stays green without the container.
+ * stays green without the container. That ergonomics is for a developer's
+ * terminal only: set REQUIRE_DYNAMODB=1, as CI does, and a missing container
+ * fails the run instead of quietly removing these guarantees from it.
  */
 
 import { randomUUID } from "node:crypto";
@@ -71,6 +73,17 @@ const containerIsUp = await fetch(ENDPOINT).then(
   () => true,
   () => false,
 );
+
+// Throwing here fails the whole file, which is the point: on a runner, a skip is
+// a test that has silently stopped protecting anything — and the test that a
+// client-supplied price is ignored is the one this project can least afford to
+// lose without noticing.
+if (!containerIsUp && process.env.REQUIRE_DYNAMODB === "1") {
+  throw new Error(
+    `REQUIRE_DYNAMODB=1 but nothing answers on ${ENDPOINT}. This suite carries ` +
+      "the fairness guarantees, so it must run here rather than skip.",
+  );
+}
 
 const guessRoute = await import("@/app/api/guess/route");
 const sessionRoute = await import("@/app/api/session/route");
