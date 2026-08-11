@@ -1,4 +1,8 @@
-# <img src="public/logo.svg" alt="" width="28" height="28" align="top" /> HODL On A Minute
+<!-- Deliberately no `align` on the mark: GitHub strips `style`, and of the legacy
+     values `top` hangs the tile above the cap height while `middle` drops it
+     through the rule under the heading. Baseline is the one that lands. -->
+
+# <img src="public/logo.svg" alt="" width="28" height="28" /> HODL On A Minute
 
 _A 60-second BTC prediction game._
 
