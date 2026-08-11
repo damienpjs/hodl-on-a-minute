@@ -16,9 +16,12 @@ export function Game() {
   const { price, status, ticks } = useLivePrice();
   const now = useNow();
 
+  // The board fills the viewport, so these two do too — otherwise the app is a
+  // line of grey text in the top-left corner of a black page for as long as the
+  // first request takes.
   if (state.isPending) {
     return (
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+      <div className="flex flex-1 items-center justify-center gap-2 p-6 text-sm text-muted-foreground">
         <Loader2 className="size-4 animate-spin" />
         Loading your game…
       </div>
@@ -27,7 +30,7 @@ export function Game() {
 
   if (state.isError || !state.data) {
     return (
-      <div className="w-full max-w-md space-y-4 text-center">
+      <div className="flex flex-1 flex-col items-center justify-center gap-4 p-6 text-center">
         <p className="text-sm text-rose-300" role="alert">
           {state.error instanceof Error
             ? state.error.message

@@ -1,258 +1,517 @@
-import { ArrowDown, ArrowUp, Bitcoin, Loader2 } from "lucide-react";
+"use client"
 
-import { GuessHistory } from "@/components/game/guess-history";
-import { PriceStatusBadge } from "@/components/game/price-status";
-import { TickChart } from "@/components/game/tick-chart";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import type { PriceStatus, PriceTick } from "@/hooks/use-live-price";
-import { RESOLUTION_DELAY_MS } from "@/lib/game";
-import type { GameState } from "@/lib/api/game-state";
-import type { Direction, LastResult } from "@/lib/types";
-import { cn } from "@/lib/utils";
+import { ArrowDown, ArrowRight, ArrowUp, Loader2, X } from "lucide-react"
+import { useEffect, useState } from "react"
+
+import { GuessHistory } from "@/components/game/guess-history"
+import { PriceStatusBadge } from "@/components/game/price-status"
+import { TickChart } from "@/components/game/tick-chart"
+import type { PriceStatus, PriceTick } from "@/hooks/use-live-price"
+import { RESOLUTION_DELAY_MS } from "@/lib/game"
+import type { GameState } from "@/lib/api/game-state"
+import { siteMetadata } from "@/lib/metadata"
+import type { Direction, LastResult } from "@/lib/types"
+import { cn } from "@/lib/utils"
 
 /**
- * The whole interface, as a pure function of its props.
+ * The whole interface, as a function of its props.
  *
  * No data fetching and no clock of its own: `now` arrives as a number, so every
- * state the player can be in — counting down, waiting for a move, just won, just
- * lost — is reachable in a test by passing different props.
+ * state the player can be in — idle, counting down, waiting for a move, just
+ * won, just lost — is reachable in a test by passing different props. The one
+ * exception is whether the history drawer is open, which is view state and
+ * belongs to nobody else.
  *
- * Two columns on a wide screen: the market and the act of playing on the left,
- * the record of past guesses on the right. On a narrow one they stack, market
- * first, so the price and the buttons stay together.
+ * ## The layout, and why it stopped being three cards
+ *
+ * The previous board laid the game out as three equal-weight panels — market,
+ * score and controls, history — which is a faithful map of the data and a poor
+ * map of the game. Nothing on that screen said what the game is actually about:
+ * *a countdown you have already bet on*. The 60 seconds were a line of body
+ * text, the price you had to beat was one number among six, and the two buttons
+ * that are the entire interaction sat at the bottom of the middle card.
+ *
+ * So this is one screen, not three cards, and it is ordered by how loud each
+ * thing deserves to be:
+ *
+ * 1. **The countdown owns the middle of the frame.** While a bet is live it is
+ *    the largest thing by an order of magnitude, and it glows. With no bet it
+ *    steps aside and the live price takes the slot at half the size — the
+ *    number you are about to bet on, not the one you are waiting on.
+ * 2. **Entry → now, side by side, directly under it**, with the difference
+ *    called out as a signed pill. This is the arithmetic the player is doing in
+ *    their head, so the screen does it for them.
+ * 3. **Up and Down are the primary target**, not a footnote: two 92px slabs
+ *    across the bottom. The one you picked stays lit; the other goes dark and
+ *    says how long it is locked for.
+ * 4. **The chart becomes wallpaper.** It is context, not content — it never
+ *    tells you anything you must read, so it goes behind everything at 60%
+ *    under a veil, where it still shows the shape of the last two minutes.
  */
 
 export type GameBoardProps = {
-  state: GameState;
-  price: number | null;
-  priceStatus: PriceStatus;
-  ticks: PriceTick[];
-  now: number;
-  onGuess: (direction: Direction) => void;
+  state: GameState
+  price: number | null
+  priceStatus: PriceStatus
+  ticks: PriceTick[]
+  now: number
+  onGuess: (direction: Direction) => void
   /** The direction being submitted right now, or `null` when nothing is in flight. */
-  placing: Direction | null;
-  actionError: string | null;
-};
+  placing: Direction | null
+  actionError: string | null
+}
+
+/** How many rounds the streak strip shows. Six slots, oldest on the left. */
+export const STREAK_SLOTS = 6
 
 const usd = new Intl.NumberFormat("en-US", {
   style: "currency",
   currency: "USD",
   maximumFractionDigits: 2,
-});
+})
 
-/**
- * Pastel rather than saturated, and only ever the current state of the market —
- * never a flash on every tick. The tension should come from the game, not from
- * the interface shouting.
- */
-function priceTone(price: number | null, entryPrice: number): string {
-  if (price === null || price === entryPrice) return "";
-  return price > entryPrice ? "text-emerald-300" : "text-rose-300";
+/** U+2212, not a hyphen: at 30px next to tabular figures a hyphen reads as a dash. */
+function signed(value: number): string {
+  const magnitude = Math.abs(value).toFixed(2)
+  return value < 0 ? `−${magnitude}` : `+${magnitude}`
 }
 
 /**
- * The mark identifies the *asset*, so it belongs to the market card and not to
- * the page title — next to the app name it would read as the game's own logo.
+ * Consecutive wins, counting back from the most recent round.
+ *
+ * Exported because it is the one piece of arithmetic on this screen that can be
+ * wrong without looking wrong — a streak that keeps counting through a loss is
+ * indistinguishable from a lucky player.
  */
-function BitcoinMark() {
-  return (
-    <span
-      className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-amber-400/15 text-amber-300 ring-1 ring-amber-300/25"
-      data-testid="bitcoin-mark"
-    >
-      <Bitcoin className="size-4" aria-hidden="true" />
-    </span>
-  );
+export function currentStreak(history: LastResult[]): number {
+  let streak = 0
+  for (const result of history) {
+    if (result.delta !== 1) break
+    streak += 1
+  }
+  return streak
 }
 
-export function GameBoard({
-  state,
-  price,
-  priceStatus,
-  ticks,
-  now,
-  onGuess,
-  placing,
-  actionError,
-}: GameBoardProps) {
-  const guess = state.activeGuess;
-  const isLocked = Boolean(guess) || placing !== null;
+export function GameBoard({ state, price, priceStatus, ticks, now, onGuess, placing, actionError }: GameBoardProps) {
+  const [historyOpen, setHistoryOpen] = useState(false)
+
+  // The history is a panel floating over the board, and a panel that only closes
+  // by clicking the exact six pixels that opened it is a trap. Bound to the
+  // document rather than to the panel: the player's focus is usually still on
+  // the call buttons when they want it gone.
+  useEffect(() => {
+    if (!historyOpen) return
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setHistoryOpen(false)
+    }
+
+    document.addEventListener("keydown", onKeyDown)
+    return () => document.removeEventListener("keydown", onKeyDown)
+  }, [historyOpen])
+
+  const guess = state.activeGuess
+  const isLocked = Boolean(guess) || placing !== null
 
   // The direction the player is committed to, from the instant they click:
   // `placing` covers the round-trip, `guess.direction` everything after it. The
   // buttons key their colour off this, so the choice is never briefly forgotten.
-  const chosen = guess?.direction ?? placing;
+  const chosen = guess?.direction ?? placing
 
   // Client clock against a server timestamp. Good enough for a countdown; the
   // resolution decision itself is made server-side and never trusts this.
-  const remainingMs = guess
-    ? Math.max(0, guess.entryAt + RESOLUTION_DELAY_MS - now)
-    : 0;
-  const remainingSeconds = Math.ceil(remainingMs / 1000);
-  const remainingFraction = remainingMs / RESOLUTION_DELAY_MS;
+  const remainingMs = guess ? Math.max(0, guess.entryAt + RESOLUTION_DELAY_MS - now) : 0
+  const remainingSeconds = Math.ceil(remainingMs / 1000)
+  const remainingFraction = guess ? remainingMs / RESOLUTION_DELAY_MS : 0
+
+  // Past the 60-second mark the app is genuinely waiting on something else —
+  // the price moving — so the countdown stands down rather than freezing at 0.
+  const counting = guess !== undefined && remainingSeconds > 0
 
   return (
-    <div className="w-full max-w-5xl space-y-10">
-      {/*
-        Centred on the page, and the app's identity alone: a title, a tagline and
-        the room a logo will take. The Bitcoin mark lives on the market card
-        below, next to the pair it actually names.
-      */}
-      <header className="space-y-1.5 text-center">
-        <h1 className="text-2xl font-semibold tracking-tight">HODL On A Minute</h1>
-        <p className="text-sm text-muted-foreground">
-          A 60-second BTC prediction game
-        </p>
-      </header>
-
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
-        <div className="space-y-6">
-          <Card className="[--card-spacing:--spacing(6)]">
-            <CardContent className="space-y-5">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2.5">
-                  <BitcoinMark />
-                  <span className="text-sm font-medium">BTC / USD</span>
-                </div>
-                <PriceStatusBadge status={priceStatus} />
-              </div>
-
-              {guess ? (
-                // Once a guess is live, the only number that matters is the one
-                // it has to beat — so the two are shown side by side.
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                      Price to beat
-                    </p>
-                    <p
-                      className="text-2xl font-semibold tabular-nums"
-                      data-testid="price-to-beat"
-                    >
-                      {usd.format(guess.entryPrice)}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                      Current
-                    </p>
-                    <p
-                      className={cn(
-                        "text-2xl font-semibold tabular-nums",
-                        priceTone(price, guess.entryPrice),
-                      )}
-                      aria-live="polite"
-                      data-testid="current-price"
-                    >
-                      {price === null ? "—" : usd.format(price)}
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                <div>
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                    Current
-                  </p>
-                  <p
-                    className="text-4xl font-semibold tabular-nums"
-                    aria-live="polite"
-                    data-testid="current-price"
-                  >
-                    {price === null ? "—" : usd.format(price)}
-                  </p>
-                </div>
-              )}
-
-              {/* Bleeds to the card edges. The card clips it, so the trace reads
-                  as the surface the numbers sit on, not as a separate widget. */}
-              <div className="-mx-6 -mb-6 h-48">
-                <TickChart
-                  ticks={ticks}
-                  entryPrice={guess?.entryPrice}
-                  entryAt={guess?.entryAt}
-                  now={now}
-                />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="[--card-spacing:--spacing(6)]">
-            <CardContent className="space-y-5">
-              <div className="flex items-baseline justify-between">
-                <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Score
-                </span>
-                <span
-                  className="text-3xl font-semibold tabular-nums"
-                  data-testid="score"
-                >
-                  {state.score > 0 ? `+${state.score}` : state.score}
-                </span>
-              </div>
-
-              <div className="border-t pt-5">
-                {guess ? (
-                  <PendingPanel
-                    direction={guess.direction}
-                    entryPrice={guess.entryPrice}
-                    remainingSeconds={remainingSeconds}
-                    priceUnavailable={state.priceUnavailable === true}
-                  />
-                ) : (
-                  <LastOutcome result={state.history[0]} />
-                )}
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <DirectionButton
-                  direction="up"
-                  chosen={chosen}
-                  locked={isLocked}
-                  isPlacing={placing === "up"}
-                  remainingFraction={remainingFraction}
-                  onClick={onGuess}
-                />
-                <DirectionButton
-                  direction="down"
-                  chosen={chosen}
-                  locked={isLocked}
-                  isPlacing={placing === "down"}
-                  remainingFraction={remainingFraction}
-                  onClick={onGuess}
-                />
-              </div>
-
-              {isLocked && (
-                <p className="text-center text-sm text-muted-foreground" role="status">
-                  {placing
-                    ? "Placing your guess…"
-                    : "One guess at a time — wait for this one to resolve."}
-                </p>
-              )}
-
-              {actionError && (
-                <p className="text-center text-sm text-rose-300" role="alert">
-                  {actionError}
-                </p>
-              )}
-            </CardContent>
-          </Card>
+    // `min-h-dvh` rather than `h-dvh`: dvh already tracks the mobile browser
+    // chrome collapsing, but a viewport short enough that the frame's own
+    // content does not fit still has to scroll rather than clip the buttons.
+    <div className="flex min-h-dvh flex-1 flex-col">
+      <div className={cn("relative isolate flex flex-1 flex-col overflow-hidden", "bg-[var(--arcade-ink)]")} data-testid="arcade-frame">
+        {/* Layer 1: the market, as wallpaper. It carries its own scrim between
+            its trace and its guides — see `TickChart`, which is the only place
+            that knows which of its marks are decoration and which are read. */}
+        <div className="pointer-events-none absolute inset-0 -z-10">
+          <TickChart variant="wallpaper" ticks={ticks} entryPrice={guess?.entryPrice} entryAt={guess?.entryAt} now={now} />
         </div>
 
-        {/* Not sticky: "Show all" can make this list taller than the viewport,
-            and a stuck element that tall hides its own bottom rows. */}
-        <aside>
-          <Card className="[--card-spacing:--spacing(6)]">
-            <CardContent>
-              <GuessHistory results={state.history} />
-            </CardContent>
-          </Card>
-        </aside>
+        {/* Layer 2: the cabinet's light. Nothing to do with the chart — it is
+            the pool the countdown sits in, and it shows on an empty frame too. */}
+        <div className="arcade-bloom pointer-events-none absolute inset-0 -z-10" />
+
+        {/* Layer 3: everything you read. `border-box` throughout, so the padding
+            is inside the frame and the buttons cannot spill past its edges. */}
+        <div className="relative flex flex-1 flex-col p-5 sm:p-8 lg:p-10">
+          <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
+            {/* Both strings come from the document metadata, so the tab, the
+                link preview and the header can never say three different
+                things. The tagline is set smaller and in the dim grey rather
+                than the amber: it is read once, on arrival, and then it is
+                furniture — giving it the accent colour would put it in
+                competition with the title it explains. */}
+            <div>
+              <h1 className="font-mono text-[11px] font-bold tracking-[0.22em] text-[var(--arcade-amber)] uppercase sm:text-[13px]">{siteMetadata.title}</h1>
+              <p className="mt-1 font-mono text-[9px] font-medium tracking-[0.14em] text-[var(--arcade-dim)] uppercase sm:text-[10px]">{siteMetadata.description}</p>
+            </div>
+
+            <div className="flex items-center gap-3 sm:gap-4">
+              <PriceStatusBadge status={priceStatus} />
+              <StreakPill streak={currentStreak(state.history)} />
+            </div>
+          </header>
+
+          <div className="flex flex-1 flex-col items-center justify-center gap-5 py-8 sm:gap-6">
+            <MainReadout counting={counting} remainingSeconds={remainingSeconds} price={price} waitingForMove={guess !== undefined && !counting} />
+
+            {/* Only while a round is live. With nothing running there is no
+                elapsed fraction to draw, and an empty track reads as a stalled
+                one. */}
+            {guess && (
+              <div className="h-1 w-full max-w-[420px] overflow-hidden rounded-full bg-white/10" role="presentation">
+                <div className="h-full rounded-full bg-[var(--arcade-amber)] transition-[width] duration-200 ease-linear motion-reduce:transition-none" style={{ width: `${Math.min(1, remainingFraction) * 100}%` }} data-testid="round-progress" />
+              </div>
+            )}
+
+            {guess && <EntryToNow entryPrice={guess.entryPrice} price={price} />}
+
+            <Verdict guess={guess} placing={placing} price={price} lastResult={state.history[0]} priceUnavailable={state.priceUnavailable === true} actionError={actionError} />
+          </div>
+
+          {/*
+            Three across from `md` up, not `lg`. At 800px the two-row fallback
+            gives the score card the full width of the frame to hold a two-digit
+            number and six pips, and it reads as an empty shelf.
+
+            `minmax(14.25rem, 3fr)` rather than a fixed width, because the frame
+            is now as wide as the display. The floor is not arbitrary: six pips
+            of 28px with 4px between them is 188px, so anything narrower wraps
+            the strip. Above the floor the column keeps the mockup's 228:378
+            ratio, which is what stops the score card from turning into a sliver
+            next to two 500px buttons on a wide screen.
+          */}
+          <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-[minmax(14.25rem,3fr)_5fr_5fr]">
+            <ScoreCard score={state.score} history={state.history} historyOpen={historyOpen} onToggleHistory={() => setHistoryOpen((open) => !open)} />
+            <DirectionButton direction="up" chosen={chosen} locked={isLocked} isPlacing={placing === "up"} remainingSeconds={remainingSeconds} onClick={onGuess} />
+            <DirectionButton direction="down" chosen={chosen} locked={isLocked} isPlacing={placing === "down"} remainingSeconds={remainingSeconds} onClick={onGuess} />
+          </div>
+
+          {/*
+            The rule is already stated three ways on screen — one button lit, the
+            other dark, and the word LOCKED under it — so repeating it in visible
+            copy would be the fourth. It is still announced, because none of
+            those three survive being read aloud.
+
+            Only for a guess that is already placed. The in-flight case is spoken
+            by the verdict line, which is a live region for exactly that reason;
+            saying it in both places would announce it twice and, less subtly,
+            put the same sentence on screen twice for a test to trip over.
+          */}
+          {guess && (
+            <p className="sr-only" role="status">
+              One guess at a time — wait for this one to resolve.
+            </p>
+          )}
+        </div>
       </div>
     </div>
-  );
+  )
+}
+
+function StreakPill({ streak }: { streak: number }) {
+  return (
+    <span className="flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.06] px-3 py-1.5" data-testid="streak">
+      <span className="font-mono text-[10px] font-medium tracking-[0.12em] text-[var(--arcade-dim)] uppercase">Streak</span>
+      <span
+        className={cn(
+          "font-mono text-[13px] font-bold tabular-nums",
+          // Zero is not an achievement, so it does not get the accent colour.
+          streak > 0 ? "text-[var(--arcade-amber)]" : "text-[var(--arcade-dim)]",
+        )}
+      >
+        {streak}
+      </span>
+    </span>
+  )
+}
+
+/**
+ * The middle of the screen, which holds exactly one number at a time.
+ *
+ * Which number is the whole design: while a bet is live it is the seconds left,
+ * because that is the only thing the player can do nothing about. The rest of
+ * the time it is the price, because that is the thing they are about to bet on.
+ * Showing both at once would mean neither is the answer to "what am I looking
+ * at".
+ */
+function MainReadout({ counting, remainingSeconds, price, waitingForMove }: { counting: boolean; remainingSeconds: number; price: number | null; waitingForMove: boolean }) {
+  if (counting) {
+    return (
+      <div className="flex flex-col items-center">
+        <p className="font-mono text-[10px] font-medium tracking-[0.28em] text-[var(--arcade-dim)] uppercase sm:text-[11px]">Seconds remaining</p>
+        <p
+          // Capped against the viewport's *height* as well as its width. On a
+          // wide-and-short window — a laptop with the dock and the browser
+          // chrome taking their cut — 17vw alone puts a 250px number in a 500px
+          // frame and the call buttons go under the fold.
+          className="arcade-glow font-mono text-[clamp(6rem,min(28vw,24vh),12rem)] leading-[1.05] font-bold tracking-[-0.05em] tabular-nums text-white"
+          aria-live="off"
+          data-testid="countdown"
+        >
+          {remainingSeconds}
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col items-center">
+      {waitingForMove ? (
+        <p className="font-mono text-[10px] font-medium tracking-[0.28em] text-[var(--arcade-amber)] uppercase sm:text-[11px]" data-testid="waiting-for-move">
+          Waiting for a move
+        </p>
+      ) : (
+        <p className="font-mono text-[10px] font-medium tracking-[0.28em] text-[var(--arcade-dim)] uppercase sm:text-[11px]">BTC / USD</p>
+      )}
+
+      {/*
+        Roughly half the countdown at every size, on purpose. A price set as
+        large as the clock would make the idle screen shout as loudly as the live
+        one, and then nothing about the layout would tell you whether a bet is
+        running. It is nine glyphs against two, so it takes the viewport's height
+        into account as well — the countdown can afford 24vh, this cannot.
+      */}
+      <p className="font-mono text-[clamp(2.75rem,min(9vw,14vh),5.5rem)] leading-[1.15] font-bold tracking-[-0.02em] tabular-nums text-white" aria-live="polite" data-testid={waitingForMove ? "waiting-price" : "current-price"}>
+        {price === null ? "—" : usd.format(price)}
+      </p>
+    </div>
+  )
+}
+
+/**
+ * Entry and now, and the distance between them.
+ *
+ * The entry price is set smaller and dimmer than the current one even though it
+ * is the number being chased: it is fixed for the whole round, so after the
+ * first read it is a reference, while the one next to it changes every second.
+ */
+function EntryToNow({ entryPrice, price }: { entryPrice: number; price: number | null }) {
+  const delta = price === null ? null : price - entryPrice
+  const ahead = delta !== null && delta > 0
+
+  return (
+    <div className="flex w-full max-w-[420px] items-center gap-3 rounded-[14px] border border-white/[0.09] bg-black/35 px-4 py-3 sm:gap-4 sm:px-5" data-testid="entry-card">
+      <div className="shrink-0">
+        <p className="font-mono text-[9px] font-medium tracking-[0.16em] text-[var(--arcade-dim)] uppercase">Entry</p>
+        <p className="font-mono text-[13px] tabular-nums text-[#c9ccd1] sm:text-[15px]" data-testid="price-to-beat">
+          {usd.format(entryPrice)}
+        </p>
+      </div>
+
+      <ArrowRight className="size-4 shrink-0 text-[var(--arcade-quiet)]" aria-hidden="true" />
+
+      <div className="min-w-0 flex-1">
+        <p className="font-mono text-[9px] font-medium tracking-[0.16em] text-[var(--arcade-dim)] uppercase">Now</p>
+        <p
+          className="truncate font-mono text-[18px] font-bold tabular-nums text-white sm:text-[24px]"
+          aria-live="polite"
+          data-testid="current-price"
+          // Asserted on instead of a colour class: the tone is the claim, the
+          // hex that renders it is an implementation detail.
+          data-tone={delta === null || delta === 0 ? "level" : ahead ? "up" : "down"}
+        >
+          {price === null ? "—" : usd.format(price)}
+        </p>
+      </div>
+
+      {delta !== null && delta !== 0 && (
+        <span
+          className={cn(
+            "shrink-0 rounded-lg px-2 py-1.5 font-mono text-[12px] font-bold tabular-nums sm:text-[15px]",
+            ahead ? "bg-[color-mix(in_srgb,var(--arcade-up)_12%,transparent)] text-[var(--arcade-up)]" : "bg-[color-mix(in_srgb,var(--arcade-down)_12%,transparent)] text-[var(--arcade-down)]",
+          )}
+          data-testid="price-delta"
+        >
+          {signed(delta)}
+        </span>
+      )}
+    </div>
+  )
+}
+
+/**
+ * One line of prose under the numbers, and only ever one.
+ *
+ * It is the only place on the screen that says something in words rather than
+ * in a shape or a colour, so it is reserved for whatever is most true right now,
+ * in this order: an error, a broken feed, a bet in flight, a bet running, the
+ * last result, the invitation.
+ */
+function Verdict({
+  guess,
+  placing,
+  price,
+  lastResult,
+  priceUnavailable,
+  actionError,
+}: {
+  guess: GameState["activeGuess"]
+  placing: Direction | null
+  price: number | null
+  lastResult?: LastResult
+  priceUnavailable: boolean
+  actionError: string | null
+}) {
+  if (actionError) {
+    return (
+      <p className="text-center text-[13px] font-medium text-[var(--arcade-down)]" role="alert">
+        {actionError}
+      </p>
+    )
+  }
+
+  if (priceUnavailable) {
+    return (
+      <p className="max-w-[36rem] text-center text-[13px] font-medium text-[var(--arcade-down)]" role="alert">
+        Price feed unreachable — your guess stays open until we can read a price.
+      </p>
+    )
+  }
+
+  if (placing) {
+    return (
+      <p className="flex items-center gap-2 text-[13px] font-medium text-[var(--arcade-dim)]" role="status">
+        <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+        Placing your guess…
+      </p>
+    )
+  }
+
+  if (guess) {
+    const delta = price === null ? null : price - guess.entryPrice
+    const winning = delta === null || delta === 0 ? null : guess.direction === "up" ? delta > 0 : delta < 0
+
+    return (
+      <p className={cn("text-center text-[13px] font-medium", winning === null && "text-[var(--arcade-dim)]", winning === true && "text-[var(--arcade-up)]", winning === false && "text-[var(--arcade-down)]")} data-testid="verdict">
+        You called {guess.direction === "up" ? "Up" : "Down"} — {winning === null ? "level with your entry" : winning ? "currently ahead" : "currently behind"}
+      </p>
+    )
+  }
+
+  if (lastResult) {
+    const won = lastResult.delta === 1
+
+    return (
+      <p className="flex items-center gap-2.5 text-[13px] font-medium" data-testid="verdict">
+        <span className={won ? "text-[var(--arcade-up)]" : "text-[var(--arcade-down)]"}>{won ? "You were right" : "You were wrong"}</span>
+        <span
+          className={cn(
+            "rounded-md px-1.5 py-0.5 font-mono text-[12px] font-bold tabular-nums",
+            won ? "bg-[color-mix(in_srgb,var(--arcade-up)_14%,transparent)] text-[var(--arcade-up)]" : "bg-[color-mix(in_srgb,var(--arcade-down)_14%,transparent)] text-[var(--arcade-down)]",
+          )}
+          data-testid="result-delta"
+        >
+          {won ? "+1" : "−1"}
+        </span>
+      </p>
+    )
+  }
+
+  return <p className="max-w-[32rem] text-center text-[13px] font-medium text-[var(--arcade-dim)]">Pick a direction. In 60 seconds, once the price has moved, you win or lose a point.</p>
+}
+
+/**
+ * Score, and the shape of how you got there.
+ *
+ * A score of −3 says almost nothing on its own: it is the same number for
+ * someone who has lost three in a row and someone who is four-and-seven and
+ * climbing. The pips put the last six rounds next to it in the space a second
+ * number would have taken, and they are the control that opens the full table —
+ * which is where the player's eye already is when they want it.
+ *
+ * The table opens *over* the board rather than under it. When the frame was a
+ * 1080px card there was a page underneath to grow into; edge to edge there is
+ * not, and a drawer below the fold is a drawer nobody finds. So it is a panel
+ * anchored to the top edge of this card — one grid cell away from the pips that
+ * summon it — and it closes on Escape, on the pips, or on its own button.
+ */
+function ScoreCard({ score, history, historyOpen, onToggleHistory }: { score: number; history: LastResult[]; historyOpen: boolean; onToggleHistory: () => void }) {
+  // Newest-first from the server, oldest-first on screen, so the strip fills
+  // left to right and the empty slot is always where the next round lands.
+  const recent = history.slice(0, STREAK_SLOTS).reverse()
+  const blanks = STREAK_SLOTS - recent.length
+
+  return (
+    <div className="relative col-span-2 flex flex-col justify-between rounded-2xl border border-white/[0.08] bg-white/[0.04] px-4 py-3.5 sm:px-5 sm:py-4 md:col-span-1">
+      <p className="font-mono text-[9px] font-medium tracking-[0.16em] text-[var(--arcade-dim)] uppercase">Score</p>
+      {/* U+2212 for the same reason as the price delta: at 34px an ASCII hyphen
+          sits too high and too short next to tabular figures, and a score is
+          read as an arithmetic quantity. */}
+      <p className="font-mono text-[28px] leading-none font-bold tabular-nums text-white sm:text-[34px]" data-testid="score">
+        {score > 0 ? `+${score}` : score < 0 ? `−${Math.abs(score)}` : "0"}
+      </p>
+
+      <button
+        type="button"
+        onClick={onToggleHistory}
+        // Disabled rather than hidden: the strip is part of the card's shape,
+        // and a card that grows a row of pips after the first round would shift
+        // the two buttons next to it.
+        disabled={history.length === 0}
+        aria-expanded={historyOpen}
+        aria-controls="history-panel"
+        className="group mt-3 flex gap-1 rounded-sm focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:outline-none enabled:cursor-pointer"
+        data-testid="toggle-history"
+      >
+        <span className="sr-only">{history.length === 0 ? "No rounds played yet" : historyOpen ? "Hide the full history" : `Show the full history (${history.length} rounds)`}</span>
+
+        {recent.map((result) => (
+          <span
+            key={result.resolvedAt}
+            aria-hidden="true"
+            data-testid="streak-pip"
+            data-outcome={result.delta === 1 ? "won" : "lost"}
+            className={cn("h-[5px] w-7 rounded-[2px] transition-opacity group-hover:opacity-80", result.delta === 1 ? "bg-[var(--arcade-up)]" : "bg-[var(--arcade-down)]")}
+          />
+        ))}
+        {Array.from({ length: blanks }, (_, index) => (
+          <span key={`blank-${index}`} aria-hidden="true" className="h-[5px] w-7 rounded-[2px] bg-white/[0.14]" />
+        ))}
+      </button>
+
+      {historyOpen && (
+        <div
+          id="history-panel"
+          // Opaque, not translucent. Everything behind it is a chart and a
+          // 12rem number, and a frosted panel over that is a legibility problem
+          // dressed up as depth.
+          className={cn("absolute bottom-full left-0 z-20 mb-3 rounded-2xl border border-white/12 bg-[#0f1216] p-5 shadow-[0_24px_60px_rgba(0,0,0,0.6)]", "w-[min(26rem,calc(100vw-2.5rem))]")}
+          data-testid="history-panel"
+        >
+          <button
+            type="button"
+            onClick={onToggleHistory}
+            className="absolute top-3 right-3 cursor-pointer rounded-md p-1 text-[var(--arcade-dim)] hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:outline-none"
+          >
+            <X className="size-4" aria-hidden="true" />
+            <span className="sr-only">Close the history</span>
+          </button>
+
+          {/* Its own scroll, capped against the viewport: "Show all" can list
+              twenty rounds, and on a short window that is taller than the
+              screen the panel is floating in. */}
+          <div className="max-h-[min(24rem,50vh)] overflow-y-auto pr-1">
+            <GuessHistory results={history} />
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }
 
 /**
@@ -263,171 +522,102 @@ export function GameBoard({
  * Three states, and only three:
  *
  * - `idle`    — both playable, tinted, hoverable.
- * - `chosen`  — locked in. Full colour at full opacity, ringed, and the fill
- *               drains left-to-right as the minute runs out.
- * - `dimmed`  — the road not taken. Stripped of colour and faded, so it reads
- *               as unavailable rather than as a second live option.
+ * - `chosen`  — locked in. Full colour, ringed, and labelled YOUR CALL.
+ * - `dimmed`  — the road not taken. Stripped of colour and labelled with how
+ *               long it stays that way, so it reads as unavailable rather than
+ *               as a second live option.
  *
- * `ghost` rather than `outline`: the outline variant carries its own
- * `dark:bg-*`, which — being a compound selector — outranks a plain `bg-*` on
- * specificity and would quietly win over the tint on this dark-only theme.
+ * A plain `<button>` rather than the shadcn one. Every prop that component
+ * offers here — size, variant, the disabled fade — is one this design overrides,
+ * and a 92px slab with two stacked labels is not a variant of a 36px control.
  */
 const DIRECTION_TONE = {
   up: {
-    idle: "border-emerald-300/25 bg-emerald-400/12 text-emerald-200 hover:bg-emerald-400/20 dark:hover:bg-emerald-400/20 hover:text-emerald-100",
-    chosen:
-      "border-emerald-300/55 bg-emerald-400/18 text-emerald-100 ring-1 ring-emerald-300/25",
-    drain: "bg-emerald-400/30",
+    accent: "var(--arcade-up)",
+    idle: "border-[color-mix(in_srgb,var(--arcade-up)_30%,transparent)] bg-[color-mix(in_srgb,var(--arcade-up)_8%,transparent)] text-[var(--arcade-up)] hover:bg-[color-mix(in_srgb,var(--arcade-up)_14%,transparent)]",
+    chosen: "border-[color-mix(in_srgb,var(--arcade-up)_45%,transparent)] bg-gradient-to-b from-[color-mix(in_srgb,var(--arcade-up)_16%,transparent)] to-[color-mix(in_srgb,var(--arcade-up)_6%,transparent)] text-[var(--arcade-up)]",
   },
   down: {
-    idle: "border-rose-300/25 bg-rose-400/12 text-rose-200 hover:bg-rose-400/20 dark:hover:bg-rose-400/20 hover:text-rose-100",
-    chosen: "border-rose-300/55 bg-rose-400/18 text-rose-100 ring-1 ring-rose-300/25",
-    drain: "bg-rose-400/30",
+    accent: "var(--arcade-down)",
+    idle: "border-[color-mix(in_srgb,var(--arcade-down)_30%,transparent)] bg-[color-mix(in_srgb,var(--arcade-down)_8%,transparent)] text-[var(--arcade-down)] hover:bg-[color-mix(in_srgb,var(--arcade-down)_14%,transparent)]",
+    chosen: "border-[color-mix(in_srgb,var(--arcade-down)_45%,transparent)] bg-gradient-to-b from-[color-mix(in_srgb,var(--arcade-down)_16%,transparent)] to-[color-mix(in_srgb,var(--arcade-down)_6%,transparent)] text-[var(--arcade-down)]",
   },
-} as const;
+} as const
 
-const DIRECTION_ICON = { up: ArrowUp, down: ArrowDown } as const;
+const DIRECTION_ICON = { up: ArrowUp, down: ArrowDown } as const
 
 function DirectionButton({
   direction,
   chosen,
   locked,
   isPlacing,
-  remainingFraction,
+  remainingSeconds,
   onClick,
 }: {
-  direction: Direction;
-  chosen: Direction | null;
-  locked: boolean;
-  isPlacing: boolean;
-  remainingFraction: number;
-  onClick: (direction: Direction) => void;
+  direction: Direction
+  chosen: Direction | null
+  locked: boolean
+  isPlacing: boolean
+  remainingSeconds: number
+  onClick: (direction: Direction) => void
 }) {
-  const tone = DIRECTION_TONE[direction];
-  const Icon = DIRECTION_ICON[direction];
+  const tone = DIRECTION_TONE[direction]
+  const Icon = DIRECTION_ICON[direction]
 
-  const state = !locked ? "idle" : chosen === direction ? "chosen" : "dimmed";
-  const remaining = Math.min(1, Math.max(0, remainingFraction));
+  const state = !locked ? "idle" : chosen === direction ? "chosen" : "dimmed"
+
+  // Careful with the wording of these: they land inside the button, so they are
+  // part of its accessible name. Neither may contain the other direction's word.
+  //
+  // `normal-case` on the seconds is not a detail — the caption is uppercased in
+  // CSS, and an uppercased unit gives "LOCKED 42S", which reads as a letter.
+  const caption =
+    state === "chosen" ? (
+      isPlacing ? (
+        "Placing…"
+      ) : (
+        "Your call"
+      )
+    ) : state === "dimmed" ? (
+      remainingSeconds > 0 ? (
+        <>
+          Locked <span className="normal-case">{remainingSeconds}s</span>
+        </>
+      ) : (
+        "Locked"
+      )
+    ) : direction === "up" ? (
+      <>
+        Higher in <span className="normal-case">60s</span>
+      </>
+    ) : (
+      <>
+        Lower in <span className="normal-case">60s</span>
+      </>
+    )
 
   return (
-    <Button
-      size="lg"
-      variant="ghost"
+    <button
+      type="button"
       className={cn(
-        "relative h-14 overflow-hidden text-base",
-        state === "idle" && tone.idle,
-        // `disabled:opacity-100` undoes the button's own fade: this one is
-        // disabled but it is not the greyed-out one, it is the answer.
-        state === "chosen" && cn(tone.chosen, "disabled:opacity-100"),
-        state === "dimmed" && "border-border text-muted-foreground disabled:opacity-40",
+        "flex min-h-[4.75rem] flex-col items-center justify-center gap-0.5 rounded-2xl border-[1.5px]",
+        "transition-colors focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:outline-none",
+        "sm:min-h-[5.75rem]",
+        state === "idle" && cn(tone.idle, "cursor-pointer"),
+        state === "chosen" && tone.chosen,
+        state === "dimmed" && "border-white/[0.08] bg-white/[0.03] text-white/28",
+        locked && "cursor-not-allowed",
       )}
       disabled={locked}
       onClick={() => onClick(direction)}
       data-testid={`direction-${direction}`}
       data-state={state}
     >
-      {/*
-        A time bar rather than a second countdown: the seconds are already
-        written above in full size, and this only has to answer "how much
-        longer" at a glance. It empties to nothing at the 60-second mark, which
-        is also the moment the copy above stops counting.
-      */}
-      {state === "chosen" && (
-        <span
-          aria-hidden="true"
-          className={cn(
-            "absolute inset-y-0 left-0 transition-[width] duration-200 ease-linear motion-reduce:transition-none",
-            tone.drain,
-          )}
-          style={{ width: `${remaining * 100}%` }}
-          data-testid={`direction-${direction}-drain`}
-        />
-      )}
-
-      <span className="relative flex items-center gap-2">
-        {isPlacing ? (
-          <Loader2 className="size-4 animate-spin" />
-        ) : (
-          <Icon className="size-4" />
-        )}
+      <span className="flex items-center gap-2 font-sans text-[20px] font-bold sm:text-[26px]">
+        {isPlacing ? <Loader2 className="size-5 animate-spin" aria-hidden="true" /> : <Icon className="size-5 sm:size-6" aria-hidden="true" />}
         {direction === "up" ? "Up" : "Down"}
       </span>
-    </Button>
-  );
-}
-
-function PendingPanel({
-  direction,
-  entryPrice,
-  remainingSeconds,
-  priceUnavailable,
-}: {
-  direction: Direction;
-  entryPrice: number;
-  remainingSeconds: number;
-  priceUnavailable: boolean;
-}) {
-  return (
-    <div className="space-y-2 text-center">
-      <p className="text-sm text-muted-foreground">
-        You guessed <span className="font-medium text-foreground">{direction}</span> from{" "}
-        {usd.format(entryPrice)}
-      </p>
-
-      {/*
-        A counter frozen at 0:00 looks broken. Past the 60-second mark the app is
-        genuinely waiting on something else — the price moving — so it says so
-        instead of pretending to count.
-      */}
-      {remainingSeconds > 0 ? (
-        <p className="text-4xl font-semibold tabular-nums">{remainingSeconds}s</p>
-      ) : (
-        <p className="text-base font-medium" data-testid="waiting-for-move">
-          Waiting for the price to move…
-        </p>
-      )}
-
-      {priceUnavailable && (
-        <p className="text-sm text-rose-300" role="alert">
-          Price feed unreachable — your guess stays open until we can read a price.
-        </p>
-      )}
-    </div>
-  );
-}
-
-/**
- * The headline only. The prices behind it live in the history list, so repeating
- * them here would say the same thing twice on one screen.
- */
-function LastOutcome({ result }: { result?: LastResult }) {
-  if (!result) {
-    return (
-      <p className="text-center text-sm text-muted-foreground">
-        Pick a direction. In 60 seconds, once the price has moved, you win or lose a
-        point.
-      </p>
-    );
-  }
-
-  const won = result.delta === 1;
-
-  return (
-    <div className="flex items-center justify-between">
-      <span className="text-sm font-medium">
-        {won ? "You were right" : "You were wrong"}
-      </span>
-      <Badge
-        variant="outline"
-        className={cn(
-          won
-            ? "border-emerald-300/30 bg-emerald-400/15 text-emerald-300"
-            : "border-rose-300/30 bg-rose-400/15 text-rose-300",
-        )}
-        data-testid="result-delta"
-      >
-        {won ? "+1" : "−1"}
-      </Badge>
-    </div>
-  );
+      <span className="font-mono text-[9px] font-medium tracking-[0.18em] uppercase opacity-70 sm:text-[10px]">{caption}</span>
+    </button>
+  )
 }
