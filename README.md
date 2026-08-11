@@ -1,4 +1,4 @@
-# HODL On A Minute
+# <img src="public/logo.svg" alt="" width="28" height="28" align="top" /> HODL On A Minute
 
 _A 60-second BTC prediction game._
 

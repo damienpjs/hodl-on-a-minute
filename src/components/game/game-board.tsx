@@ -1,6 +1,7 @@
 "use client"
 
 import { ArrowDown, ArrowRight, ArrowUp, Loader2, X } from "lucide-react"
+import Image from "next/image"
 import { useEffect, useState } from "react"
 
 import { GuessHistory } from "@/components/game/guess-history"
@@ -157,9 +158,19 @@ export function GameBoard({ state, price, priceStatus, ticks, now, onGuess, plac
                 than the amber: it is read once, on arrival, and then it is
                 furniture — giving it the accent colour would put it in
                 competition with the title it explains. */}
-            <div>
-              <h1 className="font-mono text-[11px] font-bold tracking-[0.22em] text-[var(--arcade-amber)] uppercase sm:text-[13px]">{siteMetadata.title}</h1>
-              <p className="mt-1 font-mono text-[9px] font-medium tracking-[0.14em] text-[var(--arcade-dim)] uppercase sm:text-[10px]">{siteMetadata.description}</p>
+            <div className="flex items-center gap-2.5 sm:gap-3">
+              {/* The same file the tab loads — see `@/lib/metadata`. `alt=""`
+                  because the `h1` beside it already says the name, and a mark
+                  that repeats its own label out loud is noise to a screen
+                  reader. `unoptimized` because there is nothing to optimise:
+                  the optimiser refuses SVG by default, and this one is under a
+                  kilobyte. The rounded corners are the artwork's own, so
+                  nothing here clips it. */}
+              <Image src="/logo.svg" alt="" width={64} height={64} unoptimized priority className="size-8 shrink-0 sm:size-9" />
+              <div>
+                <h1 className="font-mono text-[11px] font-bold tracking-[0.22em] text-[var(--arcade-amber)] uppercase sm:text-[13px]">{siteMetadata.title}</h1>
+                <p className="mt-1 font-mono text-[9px] font-medium tracking-[0.14em] text-[var(--arcade-dim)] uppercase sm:text-[10px]">{siteMetadata.description}</p>
+              </div>
             </div>
 
             <div className="flex items-center gap-3 sm:gap-4">
