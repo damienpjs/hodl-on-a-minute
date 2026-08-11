@@ -19,6 +19,20 @@ jobs:
     name: Lint, types and tests
     runs-on: ubuntu-latest
 
+    # The two integration suites run against a real DynamoDB, because a mocked
+    # client would only prove that we pass a ConditionExpression, never that it
+    # holds under a race. The emulator is enough for that: it is the same
+    # expression engine, it needs no credentials, and it works on pull requests
+    # from forks — which real AWS, needing secrets, would not.
+    #
+    # Pinned rather than :latest so the emulator cannot change under us between
+    # two runs. Keep in step with `db:local:up` in package.json.
+    services:
+      dynamodb:
+        image: amazon/dynamodb-local:3.3.1
+        ports:
+          - 8000:8000
+
     steps:
       - uses: actions/checkout@v4
 
@@ -45,7 +59,17 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      # No service container needed: the DynamoDB suite skips itself when
-      # nothing answers on the endpoint.
+      # Before the tests, not during: the suites treat an unreachable endpoint as
+      # "no container here" and REQUIRE_DYNAMODB turns that into a failure. Without
+      # this wait, a container still booting would fail the run for a reason that
+      # has nothing to do with the code.
+      - name: Wait for DynamoDB Local
+        run: timeout 60 sh -c 'until curl -s -o /dev/null http://localhost:8000; do sleep 1; done'
+
+      # REQUIRE_DYNAMODB makes the integration suites fail rather than skip, and
+      # `test:ci` fails on any skipped test at all — including an `it.skip` left
+      # behind in a commit. Green here means every test ran.
       - name: Tests
-        run: npm test
+        run: npm run test:ci
+        env:
+          REQUIRE_DYNAMODB: "1"

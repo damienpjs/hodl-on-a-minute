@@ -13,7 +13,9 @@
  * wins.
  *
  * The suite skips itself when nothing is listening on the endpoint, so `npm test`
- * stays green on a machine — or a CI runner — without the container.
+ * stays green on a machine without the container. That ergonomics is for a
+ * developer's terminal only: set REQUIRE_DYNAMODB=1, as CI does, and a missing
+ * container fails the run instead of quietly removing these guarantees from it.
  */
 
 import {
@@ -44,6 +46,15 @@ const containerIsUp = await fetch(ENDPOINT).then(
   () => true,
   () => false,
 );
+
+// Throwing here fails the whole file, which is the point: on a runner, a skip is
+// a test that has silently stopped protecting anything.
+if (!containerIsUp && process.env.REQUIRE_DYNAMODB === "1") {
+  throw new Error(
+    `REQUIRE_DYNAMODB=1 but nothing answers on ${ENDPOINT}. This suite carries ` +
+      "the concurrency guarantees, so it must run here rather than skip.",
+  );
+}
 
 const { createGuess, getOrCreatePlayer, getPlayer, resolveGuess } = await import(
   "@/lib/db/players"
