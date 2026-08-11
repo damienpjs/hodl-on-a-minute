@@ -2,8 +2,14 @@ import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import { GameBoard, type GameBoardProps } from "@/components/game/game-board";
+import {
+  currentStreak,
+  GameBoard,
+  type GameBoardProps,
+  STREAK_SLOTS,
+} from "@/components/game/game-board";
 import type { GameState } from "@/lib/api/game-state";
+import type { LastResult } from "@/lib/types";
 
 const ENTRY_AT = 1_700_000_000_000;
 
@@ -44,6 +50,17 @@ function withGuess(now: number, extra: Partial<GameState> = {}): Partial<GameBoa
   };
 }
 
+function round(overrides: Partial<LastResult> = {}): LastResult {
+  return {
+    direction: "up",
+    entryPrice: 65_000,
+    resolvedPrice: 65_120,
+    delta: 1,
+    resolvedAt: ENTRY_AT + 60_000,
+    ...overrides,
+  };
+}
+
 describe("GameBoard — placing a guess", () => {
   it("offers both directions when nothing is in flight", async () => {
     const { onGuess } = renderBoard();
@@ -61,6 +78,8 @@ describe("GameBoard — placing a guess", () => {
 
     expect(screen.getByRole("button", { name: /up/i })).toBeDisabled();
     expect(screen.getByRole("button", { name: /down/i })).toBeDisabled();
+    // Visually the dimmed button and its LOCKED caption carry this; the sentence
+    // exists so the rule survives being read aloud.
     expect(screen.getByText(/one guess at a time/i)).toBeInTheDocument();
   });
 
@@ -95,21 +114,48 @@ describe("GameBoard — which direction is lit", () => {
     expect(screen.getByTestId("direction-up")).toHaveAttribute("data-state", "chosen");
     expect(screen.getByTestId("direction-down")).toHaveAttribute("data-state", "dimmed");
   });
+
+  it("tells the locked-out button how long it stays locked", () => {
+    renderBoard(withGuess(ENTRY_AT + 42_000));
+
+    expect(screen.getByTestId("direction-down")).toHaveTextContent(/locked 18s/i);
+  });
 });
 
 describe("GameBoard — the wait", () => {
-  it("counts down the remaining seconds", () => {
+  it("counts down the remaining seconds, and gives them the screen", () => {
     renderBoard(withGuess(ENTRY_AT + 42_000));
 
-    expect(screen.getByText("18s")).toBeInTheDocument();
+    expect(screen.getByTestId("countdown")).toHaveTextContent("18");
+    // While a bet is live the countdown owns the readout. The live price is
+    // still on screen, but demoted into the entry card underneath it — which is
+    // the whole point of the layout, so it is worth asserting rather than
+    // assuming.
+    expect(screen.getByTestId("entry-card")).toContainElement(
+      screen.getByTestId("current-price"),
+    );
+  });
+
+  it("hands the readout back to the price when no bet is running", () => {
+    renderBoard();
+
+    expect(screen.queryByTestId("countdown")).not.toBeInTheDocument();
+    expect(screen.getByTestId("current-price")).toHaveTextContent("$65,000.00");
+  });
+
+  it("drains the round bar as the minute runs out", () => {
+    renderBoard(withGuess(ENTRY_AT + 45_000));
+
+    // 15s left of 60 — a quarter of the track.
+    expect(screen.getByTestId("round-progress")).toHaveStyle({ width: "25%" });
   });
 
   it("stops counting and names what it is waiting for once the minute is up", () => {
     renderBoard(withGuess(ENTRY_AT + 75_000));
 
-    // A counter frozen at 0s reads as a broken app; the real blocker at this
+    // A counter frozen at 0 reads as a broken app; the real blocker at this
     // point is the price, so the copy says that.
-    expect(screen.queryByText("0s")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("countdown")).not.toBeInTheDocument();
     expect(screen.getByTestId("waiting-for-move")).toBeInTheDocument();
   });
 
@@ -125,24 +171,22 @@ describe("GameBoard — reporting the outcome", () => {
   const resolved: GameState = {
     playerId: "p1",
     score: 1,
-    history: [
-      {
-        direction: "up",
-        entryPrice: 65_000,
-        resolvedPrice: 65_120,
-        delta: 1,
-        resolvedAt: ENTRY_AT + 60_000,
-      },
-    ],
+    history: [round()],
   };
 
-  it("headlines a win and lists it in the history", () => {
+  it("headlines a win, and keeps the detail one click away", async () => {
     // A live price distinct from both result prices, so the row assertion below
     // can only match the history.
     renderBoard({ state: resolved, price: 70_000 });
 
     expect(screen.getByText(/you were right/i)).toBeInTheDocument();
     expect(screen.getByTestId("result-delta")).toHaveTextContent("+1");
+
+    // Closed by default: the frame belongs to the round in progress.
+    expect(screen.queryByTestId("history-row")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId("toggle-history"));
+
     expect(screen.getByTestId("history-row")).toHaveTextContent(
       "$65,000.00 → $65,120.00",
     );
@@ -153,18 +197,94 @@ describe("GameBoard — reporting the outcome", () => {
       state: {
         ...resolved,
         score: -1,
-        history: [{ ...resolved.history[0], delta: -1, resolvedPrice: 64_900 }],
+        history: [round({ delta: -1, resolvedPrice: 64_900 })],
       },
     });
 
     expect(screen.getByText(/you were wrong/i)).toBeInTheDocument();
-    expect(screen.getByTestId("score")).toHaveTextContent("-1");
+    // U+2212, matching the price delta above it.
+    expect(screen.getByTestId("score")).toHaveTextContent("−1");
   });
 
   it("signs a positive score so it reads as a gain", () => {
     renderBoard({ state: { playerId: "p1", score: 3, history: [] } });
 
     expect(screen.getByTestId("score")).toHaveTextContent("+3");
+  });
+
+  it("cannot open a history that does not exist yet", () => {
+    renderBoard();
+
+    expect(screen.getByTestId("toggle-history")).toBeDisabled();
+  });
+
+  it("closes the history panel on Escape", async () => {
+    renderBoard({ state: resolved });
+
+    await userEvent.click(screen.getByTestId("toggle-history"));
+    expect(screen.getByTestId("history-panel")).toBeInTheDocument();
+
+    // It floats over the board, so it must be dismissible without hunting for
+    // the six pixels that opened it.
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByTestId("history-panel")).not.toBeInTheDocument();
+  });
+});
+
+describe("GameBoard — the streak strip", () => {
+  it("counts wins back from the most recent round, and stops at the first loss", () => {
+    expect(currentStreak([])).toBe(0);
+    expect(currentStreak([round({ delta: -1 })])).toBe(0);
+    expect(
+      currentStreak([round(), round(), round({ delta: -1 }), round()]),
+    ).toBe(2);
+  });
+
+  it("puts the streak in the header", () => {
+    renderBoard({
+      state: {
+        playerId: "p1",
+        score: 2,
+        history: [round({ resolvedAt: 2 }), round({ resolvedAt: 1 })],
+      },
+    });
+
+    expect(screen.getByTestId("streak")).toHaveTextContent("2");
+  });
+
+  it("shows the last rounds oldest-first, so the empty slot is where the next one lands", () => {
+    renderBoard({
+      state: {
+        playerId: "p1",
+        score: -1,
+        // Newest first, as the server sends it: a loss, then two wins.
+        history: [
+          round({ delta: -1, resolvedAt: 3 }),
+          round({ resolvedAt: 2 }),
+          round({ resolvedAt: 1 }),
+        ],
+      },
+    });
+
+    const outcomes = screen
+      .getAllByTestId("streak-pip")
+      .map((pip) => pip.getAttribute("data-outcome"));
+
+    expect(outcomes).toEqual(["won", "won", "lost"]);
+  });
+
+  it("never shows more rounds than it has slots for", () => {
+    renderBoard({
+      state: {
+        playerId: "p1",
+        score: 9,
+        history: Array.from({ length: 12 }, (_, index) =>
+          round({ resolvedAt: index + 1 }),
+        ),
+      },
+    });
+
+    expect(screen.getAllByTestId("streak-pip")).toHaveLength(STREAK_SLOTS);
   });
 });
 
@@ -173,12 +293,6 @@ describe("GameBoard — the price display", () => {
     renderBoard({ price: null, priceStatus: "connecting" });
 
     expect(screen.getByText("—")).toBeInTheDocument();
-  });
-
-  it("always shows the Bitcoin mark", () => {
-    renderBoard();
-
-    expect(screen.getByTestId("bitcoin-mark")).toBeInTheDocument();
   });
 
   it("shows only the current price while no guess is in flight", () => {
@@ -195,22 +309,46 @@ describe("GameBoard — the price display", () => {
     expect(screen.getByTestId("current-price")).toHaveTextContent("$65,400.00");
   });
 
+  it("states the distance from the entry as a signed figure", () => {
+    renderBoard({ ...withGuess(ENTRY_AT + 10_000), price: 65_400 });
+    expect(screen.getByTestId("price-delta")).toHaveTextContent("+400.00");
+
+    cleanup();
+
+    // U+2212, not a hyphen — the glyph the tabular figures were drawn with.
+    renderBoard({ ...withGuess(ENTRY_AT + 10_000), price: 64_600 });
+    expect(screen.getByTestId("price-delta")).toHaveTextContent("−400.00");
+  });
+
   it("tints the current price by where it stands, without flashing", () => {
     renderBoard({ ...withGuess(ENTRY_AT + 10_000), price: 65_400 });
-    expect(screen.getByTestId("current-price").className).toContain("emerald");
+    expect(screen.getByTestId("current-price")).toHaveAttribute("data-tone", "up");
 
     cleanup();
 
     renderBoard({ ...withGuess(ENTRY_AT + 10_000), price: 64_600 });
-    expect(screen.getByTestId("current-price").className).toContain("rose");
+    expect(screen.getByTestId("current-price")).toHaveAttribute("data-tone", "down");
   });
 
   it("leaves the current price untinted while it sits exactly on the entry", () => {
     renderBoard({ ...withGuess(ENTRY_AT + 10_000), price: 65_000 });
 
-    const tinted = screen.getByTestId("current-price").className;
-    expect(tinted).not.toContain("emerald");
-    expect(tinted).not.toContain("rose");
+    expect(screen.getByTestId("current-price")).toHaveAttribute("data-tone", "level");
+    expect(screen.queryByTestId("price-delta")).not.toBeInTheDocument();
+  });
+
+  it("says which way the round is going, in words, from the player's side", () => {
+    renderBoard({ ...withGuess(ENTRY_AT + 10_000), price: 65_400 });
+    expect(screen.getByTestId("verdict")).toHaveTextContent(
+      /you called up — currently ahead/i,
+    );
+
+    cleanup();
+
+    renderBoard({ ...withGuess(ENTRY_AT + 10_000), price: 64_600 });
+    expect(screen.getByTestId("verdict")).toHaveTextContent(
+      /you called up — currently behind/i,
+    );
   });
 });
 

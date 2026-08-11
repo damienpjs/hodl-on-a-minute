@@ -10,9 +10,25 @@
   /* This used to read `--font-sans: var(--font-sans)`. A self-reference resolves
      to nothing, so `@apply font-sans` produced an invalid font-family and every
      unstyled run of text fell back to the browser default — a serif. */
-  --font-sans: var(--font-inter);
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
-  --font-heading: var(--font-inter);
+  --font-sans: var(--font-space-grotesk);
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, Menlo,
+    monospace;
+  --font-heading: var(--font-space-grotesk);
+
+  /*
+   * The arcade palette, named by role rather than by hue.
+   *
+   * These are flat hex rather than the oklch scale below on purpose: they are
+   * lifted verbatim from the mockup, and a translated approximation of an amber
+   * that the whole screen glows with is a value someone will have to defend in
+   * review without being able to point at where it came from.
+   */
+  --color-arcade-ink: var(--arcade-ink);
+  --color-arcade-amber: var(--arcade-amber);
+  --color-arcade-up: var(--arcade-up);
+  --color-arcade-down: var(--arcade-down);
+  --color-arcade-dim: var(--arcade-dim);
+  --color-arcade-quiet: var(--arcade-quiet);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -49,6 +65,20 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+/*
+ * Lifted verbatim from the 1b "arcade" mockup. Declared on `:root` rather than
+ * on `.dark` because the game has one theme: these are the colours, not the
+ * dark-mode variant of some other set.
+ */
+:root {
+  --arcade-ink: #08090b;
+  --arcade-amber: #f0b90b;
+  --arcade-up: #3fd68c;
+  --arcade-down: #ff5c7a;
+  --arcade-dim: #8a9099;
+  --arcade-quiet: #4a4f57;
 }
 
 :root {
@@ -88,17 +118,21 @@
 
 .dark {
   /*
-   * Lifted off near-black, and no longer perfectly neutral.
+   * Back down to near-black, deliberately — and this reverses an earlier call.
    *
-   * The previous background sat at L=0.145 with zero chroma — close enough to
-   * #000 that the surface reads as a hole rather than a material, and flat
-   * enough that the amber trace looked pasted on. Raising it to L=0.205 with a
-   * trace of chroma at hue 285 gives it a temperature, and every layer above it
-   * moves up in step so the cards keep their separation.
+   * The old comment here argued for lifting the background to L=0.205 so the
+   * surface would read as a material rather than a hole. That was right for a
+   * layout made of three floating cards. The arcade layout is not: the chart is
+   * the wallpaper and the countdown throws an amber glow across it, and both of
+   * those only work over a surface with nothing of its own to say. A background
+   * with a temperature competes with the glow.
+   *
+   * The page sits one step below the frame, so the frame reads as the lit panel
+   * and the page as the cabinet around it.
    */
-  --background: oklch(0.225 0.005 285);
+  --background: #06070a;
   --foreground: oklch(0.97 0.002 285);
-  --card: oklch(0.275 0.006 285);
+  --card: #101216;
   --card-foreground: oklch(0.97 0.002 285);
   --popover: oklch(0.255 0.006 285);
   --popover-foreground: oklch(0.97 0.002 285);
@@ -140,5 +174,53 @@
   }
   html {
     @apply font-sans;
+  }
+}
+
+@layer components {
+  /*
+   * These two were one class, and separating them is what let the chart's
+   * guides be read at all.
+   *
+   * The scrim is what the *trace* is held back by, so it belongs between the
+   * trace and everything above it — including the chart's own grid and entry
+   * line, which are drawn on top of it. Anything painted under a 55-to-90%
+   * scrim keeps well under half its contrast, which is right for a decorative
+   * squiggle and fatal for a dashed rule the player is meant to read a price
+   * off.
+   *
+   * The bloom is not about the chart at all: it is the cabinet's light, a warm
+   * pool for the countdown to sit in so the number reads as lit rather than
+   * printed. It stays on the frame and shows even before the first two ticks
+   * have arrived and there is any trace to veil.
+   */
+  .arcade-scrim {
+    /* Darkens downward, because the trace is brightest where it is newest —
+       bottom right — and that is precisely where the call buttons are. A flat
+       70% would satisfy a contrast checker and kill the chart; this only pays
+       for opacity where text actually lands. */
+    background-image: linear-gradient(
+      color-mix(in srgb, var(--arcade-ink) 48%, transparent),
+      color-mix(in srgb, var(--arcade-ink) 82%, transparent)
+    );
+  }
+
+  .arcade-bloom {
+    background-image: radial-gradient(
+      120% 90% at 50% 8%,
+      color-mix(in srgb, var(--arcade-amber) 12%, transparent),
+      transparent 55%
+    );
+  }
+
+  /*
+   * The countdown's halo. `text-shadow` rather than a blurred pseudo-element
+   * behind it: the glow has to follow the glyphs, and "42" and "7" are not the
+   * same shape.
+   *
+   * Dropped entirely under reduced motion? No — it does not move. It is kept.
+   */
+  .arcade-glow {
+    text-shadow: 0 0 60px color-mix(in srgb, var(--arcade-amber) 25%, transparent);
   }
 }
