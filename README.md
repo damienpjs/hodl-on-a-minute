@@ -185,10 +185,20 @@ which speaks the same API. Docker must be running.
 ```bash
 npm install
 cp .env.example .env.local   # the file documents the DynamoDB Local values
-npm run db:local:up          # start the container
-npm run db:local             # create the table (in-memory: re-run after a restart)
+npm run dev:local            # container + table + dev server
+```
+
+`dev:local` is the three steps below chained, and every one of them is safe to re-run:
+
+```bash
+npm run db:local:up          # start the container, or create it the first time
+npm run db:local             # create the table — in-memory, so it is gone after a restart
 npm run dev
 ```
+
+If the app answers _"Cannot reach the data store"_ while Docker is clearly running, it is
+almost always the table: the container survived, its in-memory contents did not. `npm run
+db:local` puts it back.
 
 `npm run check` runs lint, typecheck and tests. Leave `DYNAMODB_ENDPOINT` empty to talk to
 real AWS — the real endpoint is the default, never something to remember to switch back to.
