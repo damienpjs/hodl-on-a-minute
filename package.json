@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:local": "npm run db:local:up && npm run db:local && npm run dev",
     "build": "next build",
     "start": "next start",
     "db:local:up": "docker start hodl-ddb || docker run -d -p 8000:8000 --name hodl-ddb amazon/dynamodb-local:3.3.1",
