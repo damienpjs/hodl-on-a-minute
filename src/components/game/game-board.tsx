@@ -46,7 +46,9 @@ import { cn } from "@/lib/utils"
  *    across the bottom — and then they leave. The whole bottom row slides out
  *    the moment a guess is placed, because none of it is actionable until the
  *    round resolves, and a screen with no buttons on it says "one guess at a
- *    time" more plainly than a greyed-out button ever did.
+ *    time" more plainly than a greyed-out button ever did. The score rides out
+ *    with them and comes back as a header pill for the duration — it is the one
+ *    passenger in that row that was never a control. See `ScorePill`.
  * 4. **The chart becomes wallpaper.** It is context, not content — it never
  *    tells you anything you must read, so it goes behind everything under a
  *    scrim, where it still shows the shape of the last two minutes.
@@ -77,6 +79,21 @@ const usd = new Intl.NumberFormat("en-US", {
 function signed(value: number): string {
   const magnitude = Math.abs(value).toFixed(2)
   return value < 0 ? `−${magnitude}` : `+${magnitude}`
+}
+
+/**
+ * The score as it is read: signed, and never as a bare `-`.
+ *
+ * Shared by the score card and the header pill, so the same number cannot end
+ * up punctuated two ways depending on where you happen to be reading it. U+2212
+ * for the same reason as the price delta — at 34px an ASCII hyphen sits too
+ * high and too short next to tabular figures, and a score is read as an
+ * arithmetic quantity.
+ */
+export function formatScore(score: number): string {
+  if (score > 0) return `+${score}`
+  if (score < 0) return `−${Math.abs(score)}`
+  return "0"
 }
 
 /**
@@ -131,17 +148,63 @@ export function GameBoard({ state, price, priceStatus, ticks, now, onGuess, plac
   // the price moving — so the countdown stands down rather than freezing at 0.
   const counting = guess !== undefined && remainingSeconds > 0
 
+  // A round is on the board — which is not the same question as "is the clock
+  // still counting". Past the 60-second mark the countdown stands down, but the
+  // entry line, the locked controls and the missing score card are all still
+  // true, so everything that dresses the frame for a live round keys off this
+  // rather than off `counting`. Keying it off the clock would repaint the whole
+  // screen at the exact moment the player is waiting on a price to move.
+  const roundLive = guess !== undefined
+
   return (
     // `min-h-dvh` rather than `h-dvh`: dvh already tracks the mobile browser
     // chrome collapsing, but a viewport short enough that the frame's own
     // content does not fit still has to scroll rather than clip the buttons.
     <div className="flex min-h-dvh flex-1 flex-col">
-      <div className={cn("relative isolate flex flex-1 flex-col overflow-hidden", "bg-[var(--arcade-ink)]")} data-testid="arcade-frame">
+      <div className={cn("relative isolate flex flex-1 flex-col overflow-hidden", "bg-[var(--arcade-ink)]")} data-testid="arcade-frame" data-round={roundLive ? "live" : "idle"}>
         {/* Layer 1: the market, as wallpaper. It carries its own scrim between
             its trace and its guides — see `TickChart`, which is the only place
             that knows which of its marks are decoration and which are read. */}
         <div className="pointer-events-none absolute inset-0 -z-10">
           <TickChart variant="wallpaper" ticks={ticks} entryPrice={guess?.entryPrice} entryAt={guess?.entryAt} now={now} />
+
+          {/*
+            The plate: a pool of ink over the chart's guides, only while a round
+            is running.
+
+            It exists because the grid and the entry line are painted over the
+            chart's own scrim on purpose — they carry information, so they may
+            not be washed out along with the trace. The cost is that their
+            height is a price, and a price eventually maps to the middle of the
+            frame: an amber rule straight through a 12rem numeral. Deepening the
+            scrim does nothing about it, because the scrim is underneath them.
+
+            Soft-edged and sized to the readout rather than to the frame, which
+            is what keeps it from being merely a third scrim: the marks hold
+            their full strength out at the edges, where their own labels are
+            pinned, and give way only in the column the board writes in.
+
+            ## It lives in here, and that is not an arrangement of convenience
+
+            It belongs *above the guides and below the text*, and there is
+            exactly one place in this tree that means both. Putting it in the
+            content layer as an early sibling does not: an absolutely positioned
+            element paints after its in-flow siblings whatever the document
+            order says, so it went over the countdown rather than under it —
+            which is the opposite of its entire job.
+
+            This wrapper is positioned with a real `z-index`, so it is a
+            stacking context: everything inside it is sealed behind the board's
+            text, and inside it document order does apply. After `TickChart`,
+            therefore over its guides. Both halves of the requirement, held by
+            construction rather than by a z-index that has to be kept in sync.
+          */}
+          <div
+            className={cn("arcade-plate absolute inset-0 transition-opacity duration-500 ease-out motion-reduce:transition-none", roundLive ? "opacity-100" : "opacity-0")}
+            aria-hidden="true"
+            data-testid="readout-plate"
+            data-active={roundLive ? "true" : "false"}
+          />
         </div>
 
         {/* Layer 2: the cabinet's light. Nothing to do with the chart — it is
@@ -175,7 +238,13 @@ export function GameBoard({ state, price, priceStatus, ticks, now, onGuess, plac
 
             <div className="flex items-center gap-3 sm:gap-4">
               <PriceStatusBadge status={priceStatus} />
-              <StreakPill streak={currentStreak(state.history)} />
+              {/* No gap between these two: the score's own margin lives inside
+                  the sleeve that collapses, so the header closes up completely
+                  when it leaves instead of keeping a 12px hole open. */}
+              <div className="flex items-center">
+                <ScorePill score={state.score} visible={isLocked} />
+                <StreakPill streak={currentStreak(state.history)} />
+              </div>
             </div>
           </header>
 
@@ -285,6 +354,61 @@ export function GameBoard({ state, price, priceStatus, ticks, now, onGuess, plac
             </p>
           )}
         </div>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The score, for as long as its card is off the screen.
+ *
+ * The card at the bottom leaves with the controls row it belongs to, which is
+ * right — every control in that row is dead mid-round — but the score is not a
+ * control, and taking the running total of the game away while the game is
+ * running is the one thing in that trade that cost the player something. So it
+ * comes up here for the duration, in the header's existing vocabulary of pills,
+ * next to the streak that never left.
+ *
+ * Never two copies of the number at once: this arrives on the same 500ms the
+ * row leaves on, a beat later, so the handover reads as the score moving rather
+ * than as a second one appearing. Smaller than the card's 34px on purpose — up
+ * here it is a reference, and the headline mid-round is the clock.
+ *
+ * ## Two things worth knowing about how it collapses
+ *
+ * `grid-template-columns: 0fr → 1fr` around an `overflow-hidden` sleeve, rather
+ * than a width or a `hidden`. A width would need a magic number that breaks the
+ * day a score reaches three digits, and `hidden` does not interpolate at all.
+ * The `fr` pair animates from nothing to exactly the content's width without
+ * anyone having to know what that width is.
+ *
+ * `aria-hidden` unconditionally, which is not an oversight. The score card is
+ * only translated off screen, never unmounted — deliberately, so that a screen
+ * reader can still reach it — so the score is in the accessibility tree the
+ * whole time. Announcing this copy as well would simply say it twice.
+ */
+function ScorePill({ score, visible }: { score: number; visible: boolean }) {
+  return (
+    <div
+      className={cn(
+        "grid transition-[grid-template-columns,opacity] duration-500 ease-out motion-reduce:transition-none",
+        visible ? "grid-cols-[1fr] opacity-100 delay-150" : "grid-cols-[0fr] opacity-0",
+      )}
+      aria-hidden="true"
+      data-testid="score-pill"
+      data-hidden={visible ? "false" : "true"}
+    >
+      <div className="overflow-hidden">
+        {/* The margin lives in here, inside the sleeve, so it collapses too. */}
+        <span className="mr-3 flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.06] px-3 py-1.5 whitespace-nowrap sm:mr-4">
+          <span className="font-mono text-[10px] font-medium tracking-[0.12em] text-[var(--arcade-dim)] uppercase">Score</span>
+          {/* White, matching the card it stands in for. The streak beside it
+              earns its amber by being a run; a score of zero is only where
+              everyone starts, and two accents in one cluster is one too many. */}
+          <span className="font-mono text-[13px] font-bold tabular-nums text-white" data-testid="score-pill-value">
+            {formatScore(score)}
+          </span>
+        </span>
       </div>
     </div>
   )
@@ -516,11 +640,8 @@ function ScoreCard({ score, history, historyOpen, onToggleHistory }: { score: nu
   return (
     <div className="relative col-span-2 flex flex-col justify-between rounded-2xl border border-white/[0.08] bg-white/[0.04] px-4 py-3.5 sm:px-5 sm:py-4 md:col-span-1">
       <p className="font-mono text-[9px] font-medium tracking-[0.16em] text-[var(--arcade-dim)] uppercase">Score</p>
-      {/* U+2212 for the same reason as the price delta: at 34px an ASCII hyphen
-          sits too high and too short next to tabular figures, and a score is
-          read as an arithmetic quantity. */}
       <p className="font-mono text-[28px] leading-none font-bold tabular-nums text-white sm:text-[34px]" data-testid="score">
-        {score > 0 ? `+${score}` : score < 0 ? `−${Math.abs(score)}` : "0"}
+        {formatScore(score)}
       </p>
 
       <button
