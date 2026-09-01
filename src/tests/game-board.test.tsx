@@ -38,7 +38,10 @@ function renderBoard(overrides: Partial<GameBoardProps> = {}) {
   return { onGuess };
 }
 
-function withGuess(now: number, extra: Partial<GameState> = {}): Partial<GameBoardProps> {
+function withGuess(
+  now: number,
+  extra: Partial<GameState> = {},
+): Partial<GameBoardProps> {
   return {
     state: {
       playerId: "p1",
@@ -101,8 +104,14 @@ describe("GameBoard — which direction is lit", () => {
   it("leaves both directions idle while nothing is in flight", () => {
     renderBoard();
 
-    expect(screen.getByTestId("direction-up")).toHaveAttribute("data-state", "idle");
-    expect(screen.getByTestId("direction-down")).toHaveAttribute("data-state", "idle");
+    expect(screen.getByTestId("direction-up")).toHaveAttribute(
+      "data-state",
+      "idle",
+    );
+    expect(screen.getByTestId("direction-down")).toHaveAttribute(
+      "data-state",
+      "idle",
+    );
   });
 
   it("lights the direction being submitted before the server has answered", () => {
@@ -110,21 +119,35 @@ describe("GameBoard — which direction is lit", () => {
 
     // The click has to feel acknowledged during the round trip, otherwise the
     // only feedback is both buttons greying out at once.
-    expect(screen.getByTestId("direction-down")).toHaveAttribute("data-state", "chosen");
-    expect(screen.getByTestId("direction-up")).toHaveAttribute("data-state", "dimmed");
+    expect(screen.getByTestId("direction-down")).toHaveAttribute(
+      "data-state",
+      "chosen",
+    );
+    expect(screen.getByTestId("direction-up")).toHaveAttribute(
+      "data-state",
+      "dimmed",
+    );
   });
 
   it("keeps the guessed direction lit for the whole minute that follows", () => {
     renderBoard(withGuess(ENTRY_AT + 10_000));
 
-    expect(screen.getByTestId("direction-up")).toHaveAttribute("data-state", "chosen");
-    expect(screen.getByTestId("direction-down")).toHaveAttribute("data-state", "dimmed");
+    expect(screen.getByTestId("direction-up")).toHaveAttribute(
+      "data-state",
+      "chosen",
+    );
+    expect(screen.getByTestId("direction-down")).toHaveAttribute(
+      "data-state",
+      "dimmed",
+    );
   });
 
   it("tells the locked-out button how long it stays locked", () => {
     renderBoard(withGuess(ENTRY_AT + 42_000));
 
-    expect(screen.getByTestId("direction-down")).toHaveTextContent(/locked 18s/i);
+    expect(screen.getByTestId("direction-down")).toHaveTextContent(
+      /locked 18s/i,
+    );
   });
 });
 
@@ -132,7 +155,10 @@ describe("GameBoard — clearing the screen for the round", () => {
   it("keeps the controls on screen while there is something to click", () => {
     renderBoard();
 
-    expect(screen.getByTestId("controls")).toHaveAttribute("data-hidden", "false");
+    expect(screen.getByTestId("controls")).toHaveAttribute(
+      "data-hidden",
+      "false",
+    );
   });
 
   it("slides the controls away once the guess is placed", () => {
@@ -141,13 +167,19 @@ describe("GameBoard — clearing the screen for the round", () => {
     // Nothing in that row is actionable during a round, so it costs the player
     // nothing — and it buys back the bottom of the display for the countdown
     // and the chart, which is the only thing they can still act on: watching.
-    expect(screen.getByTestId("controls")).toHaveAttribute("data-hidden", "true");
+    expect(screen.getByTestId("controls")).toHaveAttribute(
+      "data-hidden",
+      "true",
+    );
   });
 
   it("slides them away on the click, not on the server's answer", () => {
     renderBoard({ placing: "up" });
 
-    expect(screen.getByTestId("controls")).toHaveAttribute("data-hidden", "true");
+    expect(screen.getByTestId("controls")).toHaveAttribute(
+      "data-hidden",
+      "true",
+    );
   });
 
   it("never shows the entry line and the controls at the same time", () => {
@@ -158,14 +190,102 @@ describe("GameBoard — clearing the screen for the round", () => {
     renderBoard({ ...withGuess(ENTRY_AT + 10_000), ticks: TICKS });
 
     expect(screen.getByTestId("entry-line")).toBeInTheDocument();
-    expect(screen.getByTestId("controls")).toHaveAttribute("data-hidden", "true");
+    expect(screen.getByTestId("controls")).toHaveAttribute(
+      "data-hidden",
+      "true",
+    );
 
     cleanup();
 
     renderBoard({ ticks: TICKS });
 
     expect(screen.queryByTestId("entry-line")).not.toBeInTheDocument();
-    expect(screen.getByTestId("controls")).toHaveAttribute("data-hidden", "false");
+    expect(screen.getByTestId("controls")).toHaveAttribute(
+      "data-hidden",
+      "false",
+    );
+  });
+
+  it("keeps the score on screen when its card leaves with the controls", () => {
+    renderBoard(withGuess(ENTRY_AT + 10_000, { score: 3 }));
+
+    // The row that slides out is a row of controls, and the score is not one.
+    // It is the running total of the game, during the game.
+    const pill = screen.getByTestId("score-pill");
+    expect(pill).toHaveAttribute("data-hidden", "false");
+    expect(screen.getByTestId("score-pill-value")).toHaveTextContent("+3");
+  });
+
+  it("hands the score back to its card the moment there is one to read", () => {
+    renderBoard({ state: { playerId: "p1", score: 3, history: [] } });
+
+    // Never both at once: the card is the headline on an idle screen, and two
+    // copies of one number would make the handover read as an arrival.
+    expect(screen.getByTestId("score-pill")).toHaveAttribute(
+      "data-hidden",
+      "true",
+    );
+    expect(screen.getByTestId("score")).toHaveTextContent("+3");
+  });
+
+  it("dresses the frame for a live round, and undresses it after", () => {
+    renderBoard({ ...withGuess(ENTRY_AT + 10_000), ticks: TICKS });
+
+    // The plate is above the chart's guides, which is what makes it the only
+    // thing that can stop an entry line from crossing the countdown; the
+    // frame's `data-round` is what deepens the scrim under them.
+    expect(screen.getByTestId("arcade-frame")).toHaveAttribute(
+      "data-round",
+      "live",
+    );
+    expect(screen.getByTestId("readout-plate")).toHaveAttribute(
+      "data-active",
+      "true",
+    );
+
+    // Where it sits is the whole of whether it works, and it is the part that
+    // was got wrong first: an absolutely positioned element paints after its
+    // in-flow siblings whatever the document order says, so a plate parked in
+    // the content layer covers the countdown instead of clearing it. Inside the
+    // chart's own layer — which has a real z-index, so it is sealed behind the
+    // text — and after the chart, so it is over the guides.
+    const plate = screen.getByTestId("readout-plate");
+    const chart = screen.getByTestId("tick-chart");
+    expect(plate.parentElement).toBe(chart.parentElement);
+    expect(
+      chart.compareDocumentPosition(plate) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    cleanup();
+    renderBoard();
+
+    expect(screen.getByTestId("arcade-frame")).toHaveAttribute(
+      "data-round",
+      "idle",
+    );
+    expect(screen.getByTestId("readout-plate")).toHaveAttribute(
+      "data-active",
+      "false",
+    );
+  });
+
+  it("keeps the frame dressed past the sixty-second mark", () => {
+    // The clock has stood down and the app is waiting on the price to move, but
+    // the entry line is still drawn and the controls are still gone — so the
+    // scrim and the plate stay too. Keying them off the countdown instead would
+    // repaint the whole frame at the least welcome moment there is.
+    renderBoard(withGuess(ENTRY_AT + 90_000));
+
+    expect(screen.queryByTestId("countdown")).not.toBeInTheDocument();
+    expect(screen.getByTestId("arcade-frame")).toHaveAttribute(
+      "data-round",
+      "live",
+    );
+    expect(screen.getByTestId("readout-plate")).toHaveAttribute(
+      "data-active",
+      "true",
+    );
   });
 
   it("still announces why nothing can be clicked", () => {
@@ -217,7 +337,9 @@ describe("GameBoard — the wait", () => {
   it("tells the player when the price feed is down, without resolving anything", () => {
     renderBoard(withGuess(ENTRY_AT + 75_000, { priceUnavailable: true }));
 
-    expect(screen.getByRole("alert")).toHaveTextContent(/price feed unreachable/i);
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      /price feed unreachable/i,
+    );
     expect(screen.getByRole("button", { name: /up/i })).toBeDisabled();
   });
 });
@@ -377,18 +499,27 @@ describe("GameBoard — the price display", () => {
 
   it("tints the current price by where it stands, without flashing", () => {
     renderBoard({ ...withGuess(ENTRY_AT + 10_000), price: 65_400 });
-    expect(screen.getByTestId("current-price")).toHaveAttribute("data-tone", "up");
+    expect(screen.getByTestId("current-price")).toHaveAttribute(
+      "data-tone",
+      "up",
+    );
 
     cleanup();
 
     renderBoard({ ...withGuess(ENTRY_AT + 10_000), price: 64_600 });
-    expect(screen.getByTestId("current-price")).toHaveAttribute("data-tone", "down");
+    expect(screen.getByTestId("current-price")).toHaveAttribute(
+      "data-tone",
+      "down",
+    );
   });
 
   it("leaves the current price untinted while it sits exactly on the entry", () => {
     renderBoard({ ...withGuess(ENTRY_AT + 10_000), price: 65_000 });
 
-    expect(screen.getByTestId("current-price")).toHaveAttribute("data-tone", "level");
+    expect(screen.getByTestId("current-price")).toHaveAttribute(
+      "data-tone",
+      "level",
+    );
     expect(screen.queryByTestId("price-delta")).not.toBeInTheDocument();
   });
 
@@ -411,7 +542,10 @@ describe("GameBoard — the price-feed indicator", () => {
   it("pulses only when the feed is genuinely live", () => {
     renderBoard({ priceStatus: "live" });
 
-    expect(screen.getByTestId("price-status")).toHaveAttribute("data-status", "live");
+    expect(screen.getByTestId("price-status")).toHaveAttribute(
+      "data-status",
+      "live",
+    );
     expect(screen.getByTestId("price-status-pulse")).toBeInTheDocument();
     expect(screen.getByText("live")).toBeInTheDocument();
   });
@@ -430,7 +564,9 @@ describe("GameBoard — the price-feed indicator", () => {
       expect(badge).toHaveTextContent(label);
       // The green pulsing dot is the promise of a live feed. Anything less must
       // not wear it.
-      expect(screen.queryByTestId("price-status-pulse")).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("price-status-pulse"),
+      ).not.toBeInTheDocument();
       expect(screen.queryByText("live")).not.toBeInTheDocument();
     },
   );
