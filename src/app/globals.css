@@ -11,8 +11,8 @@
      to nothing, so `@apply font-sans` produced an invalid font-family and every
      unstyled run of text fell back to the browser default — a serif. */
   --font-sans: var(--font-space-grotesk);
-  --font-mono: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, Menlo,
-    monospace;
+  --font-mono:
+    var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
   --font-heading: var(--font-space-grotesk);
 
   /*
@@ -205,11 +205,58 @@
     );
   }
 
-  .arcade-bloom {
+  /*
+   * One notch darker, while a round is running.
+   *
+   * The trace earns its brightness on the idle screen — it is the thing being
+   * bet on. Once the bet is placed it is scenery behind a 12rem number, so it
+   * steps back and comes forward again when it matters. The board sets
+   * `data-round` on the frame; nothing else knows about it.
+   *
+   * A flat wash, and a modest one, for two reasons. It stacks *on top of*
+   * `.arcade-scrim` rather than replacing it, so the alphas compound — 24% over
+   * the base takes an already 82%-inked bottom edge to 86%, and the first
+   * attempt at this, written as if it were a replacement, took it to 98% and
+   * turned the whole frame black. And the shape of the wash is the base layer's
+   * job: repeating the gradient here would darken the bottom twice over.
+   *
+   * Two stacked layers rather than one animated `background-image`, because
+   * `background-image` is not interpolable — a single element would snap
+   * between the two washes instead of crossing between them.
+   */
+  .arcade-scrim-deep {
+    background-color: color-mix(in srgb, var(--arcade-ink) 24%, transparent);
+    opacity: 0;
+    transition: opacity 400ms ease-out;
+  }
+
+  /* Driven from the frame, not from a prop: the chart has no business knowing
+     what a round is. It publishes a scrim; the board says how dark it wants it. */
+  [data-round="live"] .arcade-scrim-deep {
+    opacity: 1;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .arcade-scrim-deep {
+      transition: none;
+    }
+  }
+
+  /*
+   * The pool of ink the countdown sits in — see `readout-plate` on the board,
+   * which is where the layering that makes it work is explained.
+   *
+   * Never fully opaque, even dead centre. It only has to take a dashed rule
+   * down to nothing, and 88% ink over a scrimmed chart does that; painting the
+   * middle of the frame flat would erase the trace rather than push it back,
+   * and the trace is the reason the screen has a chart at all.
+   */
+  .arcade-plate {
     background-image: radial-gradient(
-      120% 90% at 50% 8%,
-      color-mix(in srgb, var(--arcade-amber) 12%, transparent),
-      transparent 55%
+      42% 32% at 50% 42%,
+      color-mix(in srgb, var(--arcade-ink) 88%, transparent) 30%,
+      color-mix(in srgb, var(--arcade-ink) 55%, transparent) 66%,
+      transparent 100%
     );
   }
 
@@ -221,6 +268,7 @@
    * Dropped entirely under reduced motion? No — it does not move. It is kept.
    */
   .arcade-glow {
-    text-shadow: 0 0 60px color-mix(in srgb, var(--arcade-amber) 25%, transparent);
+    text-shadow: 0 0 60px
+      color-mix(in srgb, var(--arcade-amber) 25%, transparent);
   }
 }

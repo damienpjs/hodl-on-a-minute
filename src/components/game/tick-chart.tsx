@@ -122,7 +122,8 @@ export function niceStep(span: number, targetCount = TARGET_LEVELS): number {
   const raw = span / targetCount;
   const magnitude = 10 ** Math.floor(Math.log10(raw));
   const normalized = raw / magnitude;
-  const step = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
+  const step =
+    normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
   return step * magnitude;
 }
 
@@ -173,7 +174,8 @@ export function computeGeometry({
   const last = trace[trace.length - 1];
 
   const targetAt = entryAt === undefined ? null : entryAt + RESOLUTION_DELAY_MS;
-  const targetIsVisible = targetAt !== null && targetAt >= from && targetAt <= now;
+  const targetIsVisible =
+    targetAt !== null && targetAt >= from && targetAt <= now;
 
   const entryY = entryPrice === undefined ? null : toY(entryPrice);
 
@@ -193,8 +195,12 @@ export function computeGeometry({
     // Two reasons to drop a level, both about the thing next to it rather than
     // about the level itself: it would be drawn on top of the entry line, or
     // its label would be half off the edge of the frame.
-    if (entryY !== null && Math.abs(y - entryY) < LEVEL_ENTRY_CLEARANCE) continue;
-    if (topPct < LEVEL_EDGE_MARGIN_PCT || topPct > 100 - LEVEL_EDGE_MARGIN_PCT) {
+    if (entryY !== null && Math.abs(y - entryY) < LEVEL_ENTRY_CLEARANCE)
+      continue;
+    if (
+      topPct < LEVEL_EDGE_MARGIN_PCT ||
+      topPct > 100 - LEVEL_EDGE_MARGIN_PCT
+    ) {
       continue;
     }
 
@@ -211,7 +217,11 @@ export function computeGeometry({
   };
 }
 
-export function TickChart({ className, variant = "panel", ...input }: TickChartProps) {
+export function TickChart({
+  className,
+  variant = "panel",
+  ...input
+}: TickChartProps) {
   const geometry = computeGeometry(input);
 
   if (!geometry) return null;
@@ -219,7 +229,11 @@ export function TickChart({ className, variant = "panel", ...input }: TickChartP
   return variant === "wallpaper" ? (
     <Wallpaper geometry={geometry} className={className} />
   ) : (
-    <Panel geometry={geometry} entryPrice={input.entryPrice} className={className} />
+    <Panel
+      geometry={geometry}
+      entryPrice={input.entryPrice}
+      className={className}
+    />
   );
 }
 
@@ -268,7 +282,13 @@ function Wallpaper({
         data-testid="tick-chart-trace"
       >
         <defs>
-          <linearGradient id="tick-chart-fade-wallpaper" x1="0" y1="0" x2="0" y2="1">
+          <linearGradient
+            id="tick-chart-fade-wallpaper"
+            x1="0"
+            y1="0"
+            x2="0"
+            y2="1"
+          >
             <stop offset="0%" stopColor="currentColor" stopOpacity="0.22" />
             <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
           </linearGradient>
@@ -292,8 +312,22 @@ function Wallpaper({
       </svg>
 
       {/* 2 — the scrim. Everything before this line is decoration; everything
-          after it is meant to be read. */}
-      <div className="arcade-scrim absolute inset-0" data-testid="chart-scrim" />
+          after it is meant to be read.
+
+          Two of them, stacked. The base wash is what the idle screen needs; the
+          deeper one fades in on top of it while a round is running, when the
+          trace has stopped being the thing the player is deciding about and
+          started being scenery behind a countdown. Which of the two shows is
+          not this component's call — see `.arcade-scrim-deep`, which reads a
+          `data-round` set on the frame. */}
+      <div
+        className="arcade-scrim absolute inset-0"
+        data-testid="chart-scrim"
+      />
+      <div
+        className="arcade-scrim-deep absolute inset-0"
+        data-testid="chart-scrim-deep"
+      />
 
       {/*
         3 — the guides, across the full height of the frame.
@@ -400,7 +434,12 @@ function Wallpaper({
       {geometry.levels.map((level) => (
         <span
           key={level.price}
-          className="pointer-events-none absolute right-4 -translate-y-1/2 font-mono text-[10px] tabular-nums text-[var(--arcade-dim)] sm:right-6"
+          // Same break in the rule as the entry tag, for the same reason —
+          // these numbers are centred on the line they name. Quieter about it:
+          // a grey hairline through a grey figure costs less than an amber
+          // dash through an amber word, so the tag has no radius to speak of
+          // and only enough padding to clear the dashes either side.
+          className="pointer-events-none absolute right-4 -translate-y-1/2 rounded-[3px] bg-[var(--arcade-ink)] px-1 font-mono text-[10px] tabular-nums text-[var(--arcade-dim)] sm:right-6"
           style={{ top: `${level.topPct}%` }}
           data-testid="price-level"
         >
@@ -422,7 +461,14 @@ function Wallpaper({
       */}
       {geometry.entryTopPct !== null && (
         <span
-          className="pointer-events-none absolute left-4 -translate-y-1/2 font-mono text-[10px] font-bold tracking-[0.18em] text-[var(--arcade-amber)] uppercase sm:left-6"
+          // The plate is the whole point of this element's styling. The label
+          // is centred on the line by construction — that is what makes it a
+          // label for *that* line and not the one above — so without a ground
+          // of its own the dashes run through the letterforms, and a 10px word
+          // tracked out to 0.18em is mostly gaps for them to run through. An
+          // opaque ink tag reads as a break in the rule, which is what a chart
+          // annotation is supposed to look like anyway.
+          className="pointer-events-none absolute left-4 -translate-y-1/2 rounded-[4px] bg-[var(--arcade-ink)] px-1.5 py-0.5 font-mono text-[10px] font-bold tracking-[0.18em] text-[var(--arcade-amber)] uppercase sm:left-6"
           style={{ top: `${geometry.entryTopPct}%` }}
           data-testid="entry-label"
         >
@@ -477,7 +523,13 @@ function Panel({
         data-testid="tick-chart-trace"
       >
         <defs>
-          <linearGradient id="tick-chart-fade-panel" x1="0" y1="0" x2="0" y2="1">
+          <linearGradient
+            id="tick-chart-fade-panel"
+            x1="0"
+            y1="0"
+            x2="0"
+            y2="1"
+          >
             <stop offset="0%" stopColor="currentColor" stopOpacity="0.22" />
             <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
           </linearGradient>

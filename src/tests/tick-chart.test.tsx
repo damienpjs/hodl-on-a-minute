@@ -40,7 +40,10 @@ describe("computeGeometry", () => {
   });
 
   it("puts the newest sample at the right edge and the oldest further left", () => {
-    const geometry = computeGeometry({ ticks: ticks([65_000, 65_100]), now: NOW });
+    const geometry = computeGeometry({
+      ticks: ticks([65_000, 65_100]),
+      now: NOW,
+    });
     const xs = geometry!.line.split(" ").map((p) => Number(p.split(",")[0]));
 
     expect(xs.at(-1)).toBeCloseTo(1000, 5);
@@ -48,8 +51,13 @@ describe("computeGeometry", () => {
   });
 
   it("holds the oldest sample flat to the left edge while the window fills", () => {
-    const geometry = computeGeometry({ ticks: ticks([65_000, 65_100]), now: NOW })!;
-    const points = geometry.line.split(" ").map((p) => p.split(",").map(Number));
+    const geometry = computeGeometry({
+      ticks: ticks([65_000, 65_100]),
+      now: NOW,
+    })!;
+    const points = geometry.line
+      .split(" ")
+      .map((p) => p.split(",").map(Number));
 
     // The trace starts at x = 0, at the same height as the first real sample.
     expect(points[0][0]).toBeCloseTo(0, 5);
@@ -65,11 +73,16 @@ describe("computeGeometry", () => {
       { at: NOW, price: 65_100 },
     ];
 
-    expect(computeGeometry({ ticks: full, now: NOW })?.line.split(" ")).toHaveLength(2);
+    expect(
+      computeGeometry({ ticks: full, now: NOW })?.line.split(" "),
+    ).toHaveLength(2);
   });
 
   it("puts a rising price higher on screen than a falling one", () => {
-    const geometry = computeGeometry({ ticks: ticks([65_000, 65_500]), now: NOW });
+    const geometry = computeGeometry({
+      ticks: ticks([65_000, 65_500]),
+      now: NOW,
+    });
     const ys = geometry!.line.split(" ").map((p) => Number(p.split(",")[1]));
     const [low, high] = ys.slice(-2);
 
@@ -126,7 +139,10 @@ describe("computeGeometry", () => {
   });
 
   it("drops levels whose label would hang off the edge of the frame", () => {
-    const geometry = computeGeometry({ ticks: ticks([65_000, 65_400]), now: NOW })!;
+    const geometry = computeGeometry({
+      ticks: ticks([65_000, 65_400]),
+      now: NOW,
+    })!;
 
     for (const level of geometry.levels) {
       expect(level.topPct).toBeGreaterThanOrEqual(7);
@@ -135,7 +151,10 @@ describe("computeGeometry", () => {
   });
 
   it("survives a flat market instead of dividing by a zero-height domain", () => {
-    const geometry = computeGeometry({ ticks: ticks([65_000, 65_000]), now: NOW });
+    const geometry = computeGeometry({
+      ticks: ticks([65_000, 65_000]),
+      now: NOW,
+    });
 
     for (const point of geometry!.line.split(" ")) {
       expect(Number(point.split(",")[1])).toBeTypeOf("number");
@@ -168,11 +187,17 @@ describe("TickChart", () => {
   });
 
   it("draws the entry line only while a guess is in flight", () => {
-    const { rerender } = render(<TickChart ticks={ticks([65_000, 65_100])} now={NOW} />);
+    const { rerender } = render(
+      <TickChart ticks={ticks([65_000, 65_100])} now={NOW} />,
+    );
     expect(screen.queryByTestId("entry-line")).not.toBeInTheDocument();
 
     rerender(
-      <TickChart ticks={ticks([65_000, 65_100])} entryPrice={65_050} now={NOW} />,
+      <TickChart
+        ticks={ticks([65_000, 65_100])}
+        entryPrice={65_050}
+        now={NOW}
+      />,
     );
     expect(screen.getByTestId("entry-line")).toBeInTheDocument();
   });
@@ -180,7 +205,10 @@ describe("TickChart", () => {
   it("is hidden from assistive technology — the numbers above say the same thing", () => {
     render(<TickChart ticks={ticks([65_000, 65_100])} now={NOW} />);
 
-    expect(screen.getByTestId("tick-chart")).toHaveAttribute("aria-hidden", "true");
+    expect(screen.getByTestId("tick-chart")).toHaveAttribute(
+      "aria-hidden",
+      "true",
+    );
   });
 
   it("labels its price levels in both variants", () => {
@@ -224,6 +252,37 @@ describe("TickChart", () => {
     expect(order.indexOf("chart-scrim")).toBeLessThan(
       order.indexOf("tick-chart-guides"),
     );
+    // The deeper wash that comes in for a live round belongs with the scrim it
+    // deepens — above the trace, still under everything meant to be read.
+    expect(order.indexOf("chart-scrim-deep")).toBeLessThan(
+      order.indexOf("tick-chart-guides"),
+    );
+    expect(order.indexOf("tick-chart-trace")).toBeLessThan(
+      order.indexOf("chart-scrim-deep"),
+    );
+  });
+
+  it("puts a ground under the labels their own rule runs through", () => {
+    render(
+      <TickChart
+        ticks={ticks([65_000, 65_400])}
+        entryPrice={65_050}
+        now={NOW}
+        variant="wallpaper"
+      />,
+    );
+
+    // Both labels are centred on the line they name — that is what makes them
+    // that line's label rather than the next one's — so both need a ground, or
+    // the dashes run straight through the letterforms. Amber through a tracked
+    // out 10px word is the one that made this unreadable; the grid's greys have
+    // the same construction and the same problem, quieter.
+    expect(screen.getByTestId("entry-label").getAttribute("class")).toContain(
+      "bg-[var(--arcade-ink)]",
+    );
+    expect(
+      screen.getAllByTestId("price-level")[0].getAttribute("class"),
+    ).toContain("bg-[var(--arcade-ink)]");
   });
 
   it("gives the entry line more weight than the grid it crosses", () => {
