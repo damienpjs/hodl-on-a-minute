@@ -28,37 +28,11 @@ reading first.
 
 ## Architecture
 
-```mermaid
-flowchart LR
-  subgraph BROWSER["Browser — a view, never a source of truth"]
-    direction TB
-    STREAM["Binance WebSocket<br/>btcusdt@trade"]
-    UI["Game UI<br/>React 19 · TanStack Query<br/>polls /api/guess every 2s<br/>while a guess is in flight"]
-    STREAM -.->|display only| UI
-  end
+<p align="center">
+  <img src="docs/architecture.png" alt="Container diagram: the browser sends only a direction to the Vercel route handlers, which own the game rules, the Binance price client and the conditional DynamoDB writes." width="100%" />
+</p>
 
-  subgraph SERVER["Vercel functions · pinned to fra1"]
-    direction TB
-    ROUTES["Route handlers<br/>POST /api/guess<br/>GET /api/guess<br/>GET /api/session<br/>GET /api/price"]
-    GAME["src/lib/game<br/>pure resolution rules"]
-    PRICELIB["src/lib/price<br/>Binance wrapper"]
-    DBLIB["src/lib/db<br/>conditional writes only"]
-
-    ROUTES --> GAME
-    ROUTES --> PRICELIB
-    ROUTES --> DBLIB
-    GAME -.->|PriceSource, injected| PRICELIB
-  end
-
-  REST["Binance REST<br/>ticker/price · klines"]
-  DDB[("DynamoDB · eu-central-1<br/>hodl-on-a-minute-players")]
-
-  UI ==>|one field: a direction| ROUTES
-  PRICELIB --> REST
-  DBLIB --> DDB
-```
-
-The thick arrow is the whole client-to-server contract. Everything the game is scored on is
+The green arrow is the whole client-to-server contract. Everything the game is scored on is
 produced to the right of it. The dashed feed is display only — a browser that tampers with
 it changes its own screen and nothing else.
 
