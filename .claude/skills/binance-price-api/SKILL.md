@@ -98,7 +98,7 @@ a guess.**
 ## Live display — WebSocket
 
 ```
-wss://stream.binance.com:9443/ws/btcusdt@trade
+wss://stream.binance.com:443/ws/btcusdt@trade
 ```
 
 Message: `{ "e": "trade", "E": <ms>, "s": "BTCUSDT", "p": "65193.12000000", ... }` —

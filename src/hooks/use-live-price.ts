@@ -17,7 +17,9 @@ import { fetchServerPrice } from "@/lib/client/api";
  * our own /api/price. Slower and less pretty, but the game stays playable.
  */
 
-const BINANCE_TRADE_STREAM = "wss://stream.binance.com:9443/ws/btcusdt@trade";
+// Port 443 rather than Binance's other documented port, 9443: same server, same
+// stream, but corporate VPNs and proxies often let only 443 out.
+const BINANCE_TRADE_STREAM ="wss://stream.binance.com:443/ws/btcusdt@trade";
 
 /** A socket that connects but never delivers is a failure too — just a quiet one. */
 const FIRST_MESSAGE_TIMEOUT_MS = 5_000;
